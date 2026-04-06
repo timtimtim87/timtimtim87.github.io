@@ -124,7 +124,8 @@
                 <td>TelegramBotRole</td>
                 <td>
                   <code>s3:GetObject</code> on data bucket (read-only)<br/>
-                  <code>ssm:GetParameter</code> on Telegram + Alpaca parameter paths<br/>
+                  <code>ssm:GetParameter</code> on Telegram + Alpaca + chat_id parameter paths<br/>
+                  <code>lambda:InvokeFunction</code> on the collector function (for /trigger)<br/>
                   <code>logs:*</code> on its own log group
                 </td>
               </tr>
@@ -208,9 +209,9 @@ Init Duration: 3354.69 ms   ← cold start</pre>
       <section id="eventbridge">
         <h2>EventBridge Scheduling</h2>
         <p>
-          The data collector triggers daily at 11 AM UTC via an EventBridge cron rule.
-          This is after US market open (9:30 AM ET) to ensure previous day's EOD data
-          is available from Polygon.
+          The data collector triggers daily at 6 AM ET via an EventBridge cron rule.
+          This runs before US market open (9:30 AM ET), using the previous day's EOD
+          data from Polygon which is available overnight.
         </p>
         <pre>ScheduleExpression: cron(0 11 * * ? *)</pre>
         <p>
@@ -239,16 +240,17 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           <table>
             <thead><tr><th>File</th><th>Contents</th><th>Updated</th></tr></thead>
             <tbody>
-              <tr><td><code>russell_1000_drawdown_results.csv</code></td><td>Full 1,000-stock universe with custom metrics</td><td>Daily (overwrite)</td></tr>
-              <tr><td><code>daily_top_candidates.csv</code></td><td>Top 10 entry signals ranked by strategy metric</td><td>Daily (overwrite)</td></tr>
-              <tr><td><code>portfolio_snapshots.csv</code></td><td>Active Alpaca positions with exit metrics</td><td>Daily (overwrite)</td></tr>
+              <tr><td><code>russell_1000_drawdown_results.csv</code></td><td>Full ranked universe with drawdown metrics</td><td>Appended daily</td></tr>
+              <tr><td><code>daily_top_candidates.csv</code></td><td>Top 10 candidates ranked by strategy metric</td><td>Overwritten daily</td></tr>
+              <tr><td><code>portfolio_snapshots.csv</code></td><td>Current Alpaca positions snapshot</td><td>Appended daily</td></tr>
             </tbody>
           </table>
         </div>
         <p>
-          Files are overwritten daily — no accumulation of historical rows. Historical
-          analysis is done locally by downloading the files; S3 is not used as a time-series
-          store.
+          Two files accumulate a daily row per run — the universe results and portfolio
+          snapshots build up a history over time. The candidates file is overwritten daily
+          as it only ever represents today's top 10. Historical analysis is done locally
+          by downloading the files via presigned URL; S3 is not queried as a time-series store.
         </p>
         <h3>Versioning Lesson</h3>
         <p>
@@ -292,27 +294,41 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         <img src="Stock_Screener_Data_Collection_Flow.jpg" alt="Data collection flow diagram" style="width:100%; border-radius:8px; margin-bottom:1rem;" />
         <ol>
           <li>EventBridge fires cron rule, invokes Data Collector Lambda</li>
-          <li>Lambda retrieves Polygon and Alpaca API keys from Parameter Store</li>
-          <li>Fetches EOD price data for 1,000-stock Russell 1000 universe from Polygon</li>
-          <li>Calculates custom drawdown metrics and entry signal scores</li>
-          <li>Fetches active positions from Alpaca API</li>
-          <li>Calculates strategy-specific exit metrics for each position</li>
-          <li>Writes all three CSV files to S3 (overwrite)</li>
+          <li>Lambda retrieves Polygon and Alpaca credentials from Parameter Store</li>
+          <li>Calls Polygon snapshot endpoint — fetches current price, high, and volume for ~900 Russell 1000 stocks</li>
+          <li>For each stock with snapshot data, calls Polygon historical bars endpoint to calculate 180-day drawdown from peak</li>
+          <li>Ranks all stocks by drawdown, selects top 10 candidates</li>
+          <li>Calls Alpaca positions endpoint — fetches current holdings with entry price, current price, and unrealized P&amp;L</li>
+          <li>Writes three files to S3: full ranked universe (appended), top 10 candidates (overwritten), portfolio snapshot (appended)</li>
           <li>Lambda exits — compute cost ends</li>
         </ol>
 
-        <h3>On-Demand Query (Telegram /daily)</h3>
+        <h3>On-Demand Query (Telegram commands)</h3>
         <img src="Stock_Screener_Bot_Flow.jpg" alt="Telegram bot query flow diagram" style="width:100%; border-radius:8px; margin-bottom:1rem;" />
         <ol>
-          <li>User sends <code>/daily</code> command in Telegram</li>
+          <li>User sends a command in Telegram</li>
           <li>Telegram POSTs to API Gateway webhook endpoint</li>
           <li>API Gateway invokes Telegram Bot Lambda</li>
-          <li>Lambda retrieves Telegram bot token and Alpaca keys from Parameter Store</li>
-          <li>Reads <code>daily_top_candidates.csv</code> and <code>portfolio_snapshots.csv</code> from S3</li>
-          <li>Formats results into Telegram message (text-based, no charts)</li>
-          <li>Sends formatted message via Telegram Bot API</li>
+          <li>Lambda validates <code>chat_id</code> against an authorised value stored in Parameter Store — unauthorised requests are rejected</li>
+          <li>Lambda retrieves credentials from Parameter Store and executes the command</li>
+          <li>Formats results into a Telegram message and sends via Telegram Bot API</li>
           <li>Lambda exits</li>
         </ol>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td><code>/dashboard</code>, <code>/daily</code></td><td>Reads portfolio + screening CSVs from S3, calls Alpaca account endpoint</td></tr>
+              <tr><td><code>/screen</code></td><td>Reads top candidates or full universe CSV from S3</td></tr>
+              <tr><td><code>/portfolio</code></td><td>Reads portfolio snapshot CSV from S3</td></tr>
+              <tr><td><code>/monitor</code></td><td>Reads portfolio snapshot, checks position performance against a threshold</td></tr>
+              <tr><td><code>/account</code></td><td>Calls Alpaca account endpoint directly — equity, cash, buying power</td></tr>
+              <tr><td><code>/trigger</code></td><td>Invokes the data collector Lambda asynchronously — forces an out-of-schedule run</td></tr>
+              <tr><td><code>/stats</code></td><td>Reads all three CSVs, reports row counts and latest dates</td></tr>
+              <tr><td><code>/download</code></td><td>Generates presigned S3 URLs for all three CSVs (1-hour expiry)</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <hr class="section-divider" />
@@ -326,10 +342,15 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           webhook model that maps cleanly to API Gateway + Lambda.
         </p>
         <p>
-          The bot initially had multiple commands. In practice, only <code>/daily</code>
-          was ever used — it returns everything relevant in one response. Unnecessary
-          commands were removed. This is an example of building to actual usage, not
-          hypothetical requirements.
+          Most commands are read-only against S3. Two commands go further: <code>/account</code>
+          and <code>/dashboard</code> call Alpaca directly for live account data, and
+          <code>/trigger</code> invokes the collector Lambda asynchronously — useful for
+          forcing a fresh run outside the scheduled window without logging into AWS.
+        </p>
+        <p>
+          All requests are authenticated by validating the incoming <code>chat_id</code>
+          against a value stored in Parameter Store. Any request from an unrecognised chat
+          is blocked before any data is accessed.
         </p>
       </section>
 

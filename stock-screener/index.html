@@ -46,11 +46,6 @@
       </div>
     </header>
 
-    <div class="diagram-placeholder" style="margin-top:2.5rem;">
-      <p class="diagram-placeholder__label">Architecture Diagram</p>
-      <p>EventBridge → Lambda → S3, API Gateway → Lambda → Telegram — to be added</p>
-    </div>
-
     <section style="padding-top:2.5rem;">
       <h2>The Problem</h2>
       <p>
@@ -68,37 +63,22 @@
     </section>
 
     <section style="padding-top:2rem;">
-      <h2>Architecture Overview</h2>
+      <h2>The Solution — Two Flows</h2>
       <p>
-        The system is entirely serverless and event-driven. There are two Lambda functions,
-        two trigger mechanisms, one storage layer, and one credential store. Nothing runs
-        unless it needs to.
+        The system is built around two independent flows that work together. The collector
+        runs on a schedule each morning, pulling data from external APIs, computing metrics,
+        and writing results to S3. The bot responds to Telegram commands, reading from
+        what the collector wrote. They share state only through S3 — neither knows the
+        other exists at runtime.
       </p>
-      <pre>EventBridge (cron: 11 AM daily)
-  │
-  ▼
-Data Collector Lambda
-  │  Fetch EOD prices (Polygon API)
-  │  Calculate custom drawdown metrics
-  │  Write results to S3 (3 CSV files)
-  ▼
-S3 (storage layer)
-  ├── russell_1000_drawdown_results.csv
-  ├── daily_top_candidates.csv
-  └── portfolio_snapshots.csv
 
-Telegram (user sends /daily command)
-  │
-  ▼
-API Gateway webhook
-  │
-  ▼
-Telegram Bot Lambda
-  │  Read CSVs from S3
-  │  Fetch live positions (Alpaca API)
-  │  Format and send response
-  ▼
-Telegram message (phone)</pre>
+      <h3 style="margin-top:2rem;">Flow 1 — Daily Data Collection</h3>
+      <img src="Stock_Screener_Data_Collection_Flow.jpg" alt="Daily data collection flow" style="width:100%; border-radius:8px; margin:1rem 0;" />
+
+      <h3 style="margin-top:2rem;">Flow 2 — Telegram Bot Interface</h3>
+      <img src="Stock_Screener_Bot_Flow.jpg" alt="Telegram bot query flow" style="width:100%; border-radius:8px; margin:1rem 0;" />
+
+      <p>Full data flow details and service configuration in the <a href="technical.html">technical deep-dive →</a></p>
     </section>
 
     <section style="padding-top:2rem;">
@@ -171,11 +151,6 @@ Telegram message (phone)</pre>
           policy, causing exponential bucket growth as each daily CSV created a new version.
           A lifecycle policy to expire non-current versions after 1 day should have been
           configured at creation.
-        </li>
-        <li>
-          <strong>Single data provider.</strong> Using both Polygon and Alpaca added
-          unnecessary complexity. Alpaca supports EOD price data — consolidating to one
-          provider would simplify the architecture and reduce credential surface area.
         </li>
       </ul>
     </section>
