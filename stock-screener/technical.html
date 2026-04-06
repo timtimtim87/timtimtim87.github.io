@@ -240,7 +240,7 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           <table>
             <thead><tr><th>File</th><th>Contents</th><th>Updated</th></tr></thead>
             <tbody>
-              <tr><td><code>russell_1000_drawdown_results.csv</code></td><td>Full ranked universe with drawdown metrics</td><td>Appended daily</td></tr>
+              <tr><td><code>russell_1000_drawdown_results.csv</code></td><td>Full ranked universe with custom metrics</td><td>Appended daily</td></tr>
               <tr><td><code>daily_top_candidates.csv</code></td><td>Top 10 candidates ranked by strategy metric</td><td>Overwritten daily</td></tr>
               <tr><td><code>portfolio_snapshots.csv</code></td><td>Current Alpaca positions snapshot</td><td>Appended daily</td></tr>
             </tbody>
@@ -296,8 +296,8 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           <li>EventBridge fires cron rule, invokes Data Collector Lambda</li>
           <li>Lambda retrieves Polygon and Alpaca credentials from Parameter Store</li>
           <li>Calls Polygon snapshot endpoint — fetches current price, high, and volume for ~900 Russell 1000 stocks</li>
-          <li>For each stock with snapshot data, calls Polygon historical bars endpoint to calculate 180-day drawdown from peak</li>
-          <li>Ranks all stocks by drawdown, selects top 10 candidates</li>
+          <li>For each stock with snapshot data, calls Polygon historical bars endpoint to calculate custom metrics</li>
+          <li>Ranks all stocks by strategy metric, selects top 10 candidates</li>
           <li>Calls Alpaca positions endpoint — fetches current holdings with entry price, current price, and unrealized P&amp;L</li>
           <li>Writes three files to S3: full ranked universe (appended), top 10 candidates (overwritten), portfolio snapshot (appended)</li>
           <li>Lambda exits — compute cost ends</li>
