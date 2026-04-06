@@ -28,7 +28,7 @@
       <h1 class="page-header__title">ChessChat</h1>
       <p class="page-header__subtitle">
         Real-time video chess platform. Two players, one room code, live video —
-        built on production-grade AWS infrastructure with a genuine commercial model.
+        built on production-grade AWS infrastructure.
       </p>
       <div class="tags" style="margin-top:1.25rem;">
         <span class="tag">ECS Fargate</span>
@@ -58,8 +58,7 @@
       <p>
         ChessChat lets two players compete at chess over live video using a shared room code.
         There are no matchmaking queues or strangers — users invite people they already know,
-        which eliminates the cold-start problem and makes every new user a natural growth vector:
-        they have to bring an opponent.
+        and by design they have to bring an opponent.
       </p>
       <p>
         The gameplay model follows <strong>phone-call session semantics</strong>: both players
@@ -155,25 +154,6 @@ Static landing / auth       Authenticated gameplay runtime
     </section>
 
     <section style="padding-top:2rem;">
-      <h2>Commercial Model</h2>
-      <p>
-        ChessChat is a real product with genuine commercial ambitions, not just a portfolio
-        exercise. Architecture decisions are informed by the business model — cost, scaling,
-        and user growth are all part of the design.
-      </p>
-      <ul>
-        <li><strong>7-day free trial</strong> → monthly or annual subscription (~50% annual discount)</li>
-        <li><strong>No permanent free tier</strong> — subsidising non-converting users is unsustainable at any meaningful scale</li>
-        <li><strong>Referral mechanic</strong> — referring a friend earns one free month, making each user a natural acquisition channel</li>
-        <li><strong>Sponsorship model</strong> — base fee plus a multiple of video infrastructure costs, auto-scaling with usage and verifiable against the AWS bill</li>
-      </ul>
-      <p>
-        Growth strategy: seed with mid-tier chess content creators → Meta advertising targeting
-        chess communities → creator co-streaming tournaments unlocking sponsorship revenue.
-      </p>
-    </section>
-
-    <section style="padding-top:2rem;">
       <h2>Project Status</h2>
       <div class="table-wrap">
         <table>
@@ -189,7 +169,6 @@ Static landing / auth       Authenticated gameplay runtime
             <tr><td>Chess gameplay — WebSocket, move validation, clocks, sound</td><td><span class="status status--live">Live</span></td></tr>
             <tr><td>Social features — friends, challenges, notifications</td><td><span class="status status--wip">In progress</span></td></tr>
             <tr><td>Chess.com OAuth integration</td><td><span class="status status--wip">Awaiting credentials</span></td></tr>
-            <tr><td>Stripe billing integration</td><td><span class="status status--planned">Planned</span></td></tr>
             <tr><td>WebRTC + Coturn migration</td><td><span class="status status--planned">Planned — pre-launch</span></td></tr>
             <tr><td>WAF</td><td><span class="status status--planned">Planned — hardening phase</span></td></tr>
           </tbody>
