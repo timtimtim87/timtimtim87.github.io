@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SUDOKOO — Tim Hewitt</title>
+  <meta name="description" content="AI-powered Sudoku web app using Amazon Bedrock. Architecture overview." />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+
+  <nav class="site-nav">
+    <div class="site-nav__inner">
+      <a href="/" class="site-nav__logo">tim hewitt</a>
+      <ul class="site-nav__links">
+        <li><a href="/#projects">Projects</a></li>
+        <li><a href="/#about">About</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn ↗</a></li>
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="container">
+
+    <header class="page-header">
+      <p class="page-header__eyebrow">AI Integration · Serverless · Web App</p>
+      <h1 class="page-header__title">SUDOKOO</h1>
+      <p class="page-header__subtitle">
+        AI-powered web app that photographs a Sudoku puzzle and turns it into an interactive
+        game — using Amazon Bedrock with Claude 3.5 Sonnet for computer vision extraction.
+      </p>
+      <div class="tags" style="margin-top:1.25rem;">
+        <span class="tag">Amazon Bedrock</span>
+        <span class="tag">Lambda</span>
+        <span class="tag">CloudFront</span>
+        <span class="tag">API Gateway</span>
+        <span class="tag">S3</span>
+        <span class="tag">Python</span>
+      </div>
+      <div style="margin-top:1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+        <span class="status status--live">Live</span>
+        <a href="technical.html" class="btn btn--outline" style="font-size:0.82rem;">Technical deep-dive →</a>
+        <a href="https://github.com/timtimtim87/SUDOKOO" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+    </header>
+
+    <div class="diagram-placeholder" style="margin-top:2.5rem;">
+      <p class="diagram-placeholder__label">Architecture Diagram</p>
+      <p>CloudFront → S3, API Gateway → Lambda → Bedrock — to be added</p>
+    </div>
+
+    <section style="padding-top:2.5rem;">
+      <h2>The Problem</h2>
+      <p>
+        My girlfriend had a Sudoku puzzle from a newspaper she'd kept for years. She wouldn't
+        let me write on it — she wanted to finish it herself. I wanted to digitalise it so
+        she could play it without marking the original. That very specific, very personal
+        problem became the starting point.
+      </p>
+      <p>
+        Beyond solving the niche problem, the project was an opportunity to learn how to
+        integrate AI into a real application using AWS infrastructure — specifically
+        Amazon Bedrock for managed model access.
+      </p>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>Architecture Overview</h2>
+      <p>
+        The system is a standard serverless web application with one unusual ingredient:
+        a Lambda function that sends a base64-encoded image to Amazon Bedrock and parses
+        the structured response into a playable puzzle grid.
+      </p>
+      <pre>User (browser)
+  │  HTTPS
+  ▼
+CloudFront (CDN + HTTPS enforcement)
+  │  Origin Access Control
+  ▼
+S3 (private bucket — HTML, CSS, JS)
+
+User uploads puzzle photo
+  │  HTTPS POST (base64 image)
+  ▼
+API Gateway
+  │
+  ▼
+Lambda (Python)
+  │  Invoke model: claude-3-5-sonnet
+  ▼
+Amazon Bedrock
+  │  Returns: extracted 9x9 grid (JSON)
+  ▼
+Lambda (validates puzzle, returns to browser)
+  ▼
+Browser (renders interactive Sudoku game)</pre>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>Key Design Decisions</h2>
+
+      <div class="decision">
+        <p class="decision__label">Decision · AI Service Selection</p>
+        <p>
+          <strong>Bedrock over Rekognition or a custom model.</strong> Rekognition is designed
+          for object detection and facial recognition — extracting a structured 9×9 grid with
+          cell values is not its intended use case. A custom model would require training data
+          and significant upfront investment. Bedrock with Claude accepts a natural language
+          prompt describing the extraction task and returns the result. Fastest path to a
+          working solution.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Decision · No VPC</p>
+        <p>
+          <strong>Lambda in public mode.</strong> Lambda accesses Bedrock and S3 via AWS
+          internal service endpoints without a VPC. Adding VPC configuration would require
+          a NAT Gateway (~$45/month) with no security benefit for this workload. The correct
+          tradeoff for a personal portfolio project.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Decision · CloudFront + S3 with OAC</p>
+        <p>
+          <strong>Private S3 bucket with Origin Access Control.</strong> The bucket policy
+          grants read access only to this specific CloudFront distribution — verified by
+          the distribution's unique ARN. Users access files only through CloudFront,
+          never directly from S3. This prevents bypassing the CDN and avoids unexpected
+          S3 data transfer charges.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Decision · WAF removed</p>
+        <p>
+          <strong>WAF deployed then removed.</strong> AWS WAF was initially configured for
+          SQL injection, XSS, and DDoS protection. At $8/month for 3 active rules on a
+          single-user portfolio project, the cost was disproportionate. Removed — but the
+          configuration knowledge is there for production deployments where the cost is
+          justified.
+        </p>
+      </div>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>Honest Assessment</h2>
+      <p>
+        The AI extraction works approximately 50% of the time. The two main failure modes
+        are grid alignment issues (correct values in adjacent cells) and character recognition
+        errors (1 misread as 7). The built-in puzzle validation catches bad extractions before
+        loading them into the game.
+      </p>
+      <p>
+        For a niche personal use case, 50% is acceptable — the alternative (marking the
+        physical newspaper) was worse. For a production application, the approach would
+        be different: Claude's structured JSON output mode would replace the current
+        free-text parsing, and a validation pipeline would reject and re-request
+        extractions below a confidence threshold.
+      </p>
+      <p>
+        Manual deployment through the AWS console was a deliberate choice to build deeper
+        understanding of each service's configuration options. The tradeoff was slow
+        iteration — uploading new frontend files and invalidating CloudFront manually
+        every time became tedious. A CI/CD pipeline (GitHub Actions → S3 sync →
+        CloudFront invalidation) would be the first improvement if this project continued.
+      </p>
+    </section>
+
+    <section style="padding: 2.5rem 0 4rem;">
+      <hr class="section-divider" />
+      <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+        <a href="technical.html" class="btn btn--primary">Technical deep-dive →</a>
+        <a href="https://github.com/timtimtim87/SUDOKOO" class="btn btn--outline" target="_blank" rel="noopener">View on GitHub ↗</a>
+        <a href="/" class="btn btn--outline">← All projects</a>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <p>© 2025 Tim Hewitt</p>
+      <ul class="site-footer__links">
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn</a></li>
+        <li><a href="mailto:tim.antibes@gmail.com">Email</a></li>
+      </ul>
+    </div>
+  </footer>
+
+</body>
+</html>

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChessChat — Tim Hewitt</title>
+  <meta name="description" content="ChessChat: real-time video chess platform on AWS." />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+
+  <nav class="site-nav">
+    <div class="site-nav__inner">
+      <a href="/" class="site-nav__logo">tim hewitt</a>
+      <ul class="site-nav__links">
+        <li><a href="/#projects">Projects</a></li>
+        <li><a href="/#about">About</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn ↗</a></li>
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="container">
+
+    <header class="page-header">
+      <p class="page-header__eyebrow">Flagship Project · AWS Solutions Architect</p>
+      <h1 class="page-header__title">ChessChat</h1>
+      <p class="page-header__subtitle">
+        Real-time video chess platform. Two players, one room code, live video —
+        built on production-grade AWS infrastructure with a genuine commercial model.
+      </p>
+      <div class="tags" style="margin-top:1.25rem;">
+        <span class="tag">ECS Fargate</span>
+        <span class="tag">Three-tier VPC</span>
+        <span class="tag">DynamoDB</span>
+        <span class="tag">ElastiCache Redis</span>
+        <span class="tag">Cognito</span>
+        <span class="tag">CloudFront</span>
+        <span class="tag">ALB</span>
+        <span class="tag">Terraform</span>
+        <span class="tag">GitHub Actions</span>
+      </div>
+      <div style="margin-top:1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+        <span class="status status--wip">Infrastructure live · App in progress</span>
+        <a href="technical.html" class="btn btn--outline" style="font-size:0.82rem;">Technical deep-dive →</a>
+        <a href="https://github.com/timtimtim87/CHESSCHAT_V2" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">GitHub ↗</a>
+        <a href="https://chess-chat.com" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">chess-chat.com ↗</a>
+      </div>
+    </header>
+
+    <div class="diagram-placeholder" style="margin-top:2.5rem;">
+      <p class="diagram-placeholder__label">Infrastructure Diagram</p>
+      <p>Three-tier VPC architecture diagram — to be added</p>
+    </div>
+
+    <section style="padding-top:2.5rem;">
+      <h2>What It Is</h2>
+      <p>
+        ChessChat lets two players compete at chess over live video using a shared room code.
+        There are no matchmaking queues or strangers — users invite people they already know,
+        which eliminates the cold-start problem and makes every new user a natural growth vector:
+        they have to bring an opponent.
+      </p>
+      <p>
+        The gameplay model follows <strong>phone-call session semantics</strong>: both players
+        enter a video room that persists for the session, playing as many sequential chess games
+        as they want within it. Video chat never interrupts between games. When both players
+        leave, the room tears down immediately — no stale state, no forgotten sessions
+        accumulating infrastructure costs.
+      </p>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>Architecture Overview</h2>
+      <p>
+        The platform uses a <strong>split-host architecture</strong> — the static marketing and
+        auth surface (<code>chess-chat.com</code>) runs on CloudFront + S3, while the gameplay
+        runtime (<code>app.chess-chat.com</code>) runs on ECS Fargate behind an ALB. These are
+        deliberately separate delivery mechanisms with different scaling, caching, and security
+        profiles, kept intentionally apart.
+      </p>
+      <pre>chess-chat.com              app.chess-chat.com
+(CloudFront + S3)           (ALB → ECS Fargate)
+Static landing / auth       Authenticated gameplay runtime
+      │                              │
+      └──────── Cognito ─────────────┘
+                                     │
+                      ┌──────────────┼──────────────┐
+                      │              │              │
+                 ElastiCache     DynamoDB       Chime SDK
+                 Redis            (Users,        (Video)
+                 (Room/game        Games,
+                  state)           Social)</pre>
+      <p>
+        The underlying network is a <strong>three-tier VPC</strong> across three Availability
+        Zones in <code>us-east-1</code>. Public subnets host the ALB and NAT Gateway. Private
+        app subnets host Fargate tasks with no public IPs. Private data subnets host Redis
+        with zero internet access. Security groups enforce one-directional trust at every layer:
+        internet → ALB → Fargate → Redis.
+      </p>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>Key Design Decisions</h2>
+      <p>Each of these was a deliberate tradeoff. Full rationale is captured in the ADRs in the repo.</p>
+
+      <div class="decision">
+        <p class="decision__label">ADR-0002 · Split-Host Architecture</p>
+        <p>
+          Separating the static auth surface from the app runtime produces a cleaner security
+          boundary, independent deployment pipelines, and a stronger architecture narrative.
+          CloudFront handles the public surface; the ALB never sees unauthenticated traffic.
+          The two hosts use different AWS delivery mechanisms by design, not convenience.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">ADR-0001 · Single NAT Gateway</p>
+        <p>
+          The VPC has three AZs and private subnets in each, but egress routes through one
+          NAT Gateway — saving ~$32/month at the cost of a single-AZ egress dependency.
+          The Terraform VPC module accepts a <code>nat_gateway_mode</code> variable so
+          switching to per-AZ NAT is a one-variable change, not a network redesign.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">ADR-0004 · Phone-Call Room Lifecycle</p>
+        <p>
+          Rooms exist only during live participation. A short 12-second reconnect grace handles
+          accidental disconnects without triggering full teardown. No rematch or room reuse —
+          players start a new room. This eliminates stale-state risk and makes video
+          infrastructure cost predictable.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Data Layer · Redis + DynamoDB Split</p>
+        <p>
+          Active room and game state lives in Redis with TTL expiry. DynamoDB receives exactly
+          one write per completed game. Write costs scale with games completed, not moves played.
+          Redis stays small regardless of total match history volume.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Video · Chime SDK → WebRTC Migration Plan</p>
+        <p>
+          Chime SDK provided a fast path to working video. The planned migration to native
+          browser WebRTC + self-hosted Coturn eliminates per-minute billing in favour of flat
+          EC2 cost. All sessions are 1-on-1 so an SFU is never needed; only ~15% require TURN
+          relay, keeping Coturn costs predictable at any reasonable scale.
+        </p>
+      </div>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>Commercial Model</h2>
+      <p>
+        ChessChat is a real product with genuine commercial ambitions, not just a portfolio
+        exercise. Architecture decisions are informed by the business model — cost, scaling,
+        and user growth are all part of the design.
+      </p>
+      <ul>
+        <li><strong>7-day free trial</strong> → monthly or annual subscription (~50% annual discount)</li>
+        <li><strong>No permanent free tier</strong> — subsidising non-converting users is unsustainable at any meaningful scale</li>
+        <li><strong>Referral mechanic</strong> — referring a friend earns one free month, making each user a natural acquisition channel</li>
+        <li><strong>Sponsorship model</strong> — base fee plus a multiple of video infrastructure costs, auto-scaling with usage and verifiable against the AWS bill</li>
+      </ul>
+      <p>
+        Growth strategy: seed with mid-tier chess content creators → Meta advertising targeting
+        chess communities → creator co-streaming tournaments unlocking sponsorship revenue.
+      </p>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>Project Status</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Component</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>VPC — 3-tier, 3-AZ, VPC endpoints, flow logs</td><td><span class="status status--live">Live</span></td></tr>
+            <tr><td>DynamoDB — Users, Games, social tables</td><td><span class="status status--live">Live</span></td></tr>
+            <tr><td>ElastiCache Redis — Multi-AZ, Secrets Manager auth token</td><td><span class="status status--live">Live</span></td></tr>
+            <tr><td>Cognito — User pool, Google OAuth, hosted UI</td><td><span class="status status--live">Live</span></td></tr>
+            <tr><td>ECS Fargate + ALB + HTTPS</td><td><span class="status status--live">Live</span></td></tr>
+            <tr><td>CloudFront + S3 static site (chess-chat.com)</td><td><span class="status status--live">Live</span></td></tr>
+            <tr><td>CI/CD — GitHub Actions with OIDC auth</td><td><span class="status status--live">Live</span></td></tr>
+            <tr><td>Chess gameplay — WebSocket, move validation, clocks, sound</td><td><span class="status status--live">Live</span></td></tr>
+            <tr><td>Social features — friends, challenges, notifications</td><td><span class="status status--wip">In progress</span></td></tr>
+            <tr><td>Chess.com OAuth integration</td><td><span class="status status--wip">Awaiting credentials</span></td></tr>
+            <tr><td>Stripe billing integration</td><td><span class="status status--planned">Planned</span></td></tr>
+            <tr><td>WebRTC + Coturn migration</td><td><span class="status status--planned">Planned — pre-launch</span></td></tr>
+            <tr><td>WAF</td><td><span class="status status--planned">Planned — hardening phase</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section style="padding: 2.5rem 0 4rem;">
+      <hr class="section-divider" />
+      <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+        <a href="technical.html" class="btn btn--primary">Technical deep-dive →</a>
+        <a href="https://github.com/timtimtim87/CHESSCHAT_V2" class="btn btn--outline" target="_blank" rel="noopener">View on GitHub ↗</a>
+        <a href="/" class="btn btn--outline">← All projects</a>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <p>© 2025 Tim Hewitt</p>
+      <ul class="site-footer__links">
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn</a></li>
+        <li><a href="mailto:tim.antibes@gmail.com">Email</a></li>
+      </ul>
+    </div>
+  </footer>
+
+</body>
+</html>

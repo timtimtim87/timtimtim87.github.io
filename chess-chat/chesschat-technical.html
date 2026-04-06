@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChessChat — Technical Deep-Dive</title>
+  <meta name="description" content="ChessChat technical architecture: VPC design, IaC, data flow, DynamoDB schema, security." />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+
+  <nav class="site-nav">
+    <div class="site-nav__inner">
+      <a href="/" class="site-nav__logo">tim hewitt</a>
+      <ul class="site-nav__links">
+        <li><a href="/#projects">Projects</a></li>
+        <li><a href="/#about">About</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn ↗</a></li>
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Page header outside the layout grid -->
+  <div class="container">
+    <header class="page-header">
+      <p class="page-header__eyebrow"><a href="index.html">ChessChat</a> · Technical Deep-Dive</p>
+      <h1 class="page-header__title" style="font-size:clamp(1.6rem,4vw,2.25rem);">Infrastructure, IaC &amp; Data Design</h1>
+      <p class="page-header__subtitle">
+        VPC architecture, Terraform module structure, DynamoDB schema, data flow,
+        and security model — with the reasoning behind each decision.
+      </p>
+      <div style="margin-top:1rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
+        <a href="index.html" class="btn btn--outline" style="font-size:0.82rem;">← Project overview</a>
+        <a href="https://github.com/timtimtim87/CHESSCHAT_V2" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+    </header>
+  </div>
+
+  <!-- Two-column layout: sidebar + content -->
+  <div class="page-layout">
+
+    <!-- ── Sidebar ──────────────────────────────────────────── -->
+    <aside class="page-sidebar">
+      <p class="page-sidebar__title">Contents</p>
+      <nav id="toc">
+        <span class="nav-section">Network</span>
+        <a href="#vpc">VPC Architecture</a>
+        <a href="#security-groups">Security Groups</a>
+        <a href="#vpc-endpoints">VPC Endpoints</a>
+
+        <span class="nav-section">Infrastructure as Code</span>
+        <a href="#terraform-structure">Terraform Structure</a>
+        <a href="#remote-state">Remote State</a>
+        <a href="#cicd">CI/CD Pipeline</a>
+
+        <span class="nav-section">Data</span>
+        <a href="#data-split">Redis vs DynamoDB</a>
+        <a href="#dynamodb-schema">DynamoDB Schema</a>
+        <a href="#redis-schema">Redis Schema</a>
+
+        <span class="nav-section">Application</span>
+        <a href="#data-flow">Data Flow</a>
+        <a href="#session-lifecycle">Session Lifecycle</a>
+        <a href="#websocket">WebSocket Routing</a>
+        <a href="#video">Video Infrastructure</a>
+
+        <span class="nav-section">Operations</span>
+        <a href="#security">Security Model</a>
+        <a href="#observability">Observability</a>
+        <a href="#cost">Cost Model</a>
+      </nav>
+    </aside>
+
+    <!-- ── Main content ─────────────────────────────────────── -->
+    <main class="page-content">
+
+      <!-- ── VPC Architecture ──────────────────────────────── -->
+      <section id="vpc">
+        <h2>VPC Architecture</h2>
+        <p>
+          The network is a three-tier VPC across three Availability Zones in
+          <code>us-east-1</code> (CIDR <code>10.0.0.0/16</code>). Each tier has a distinct
+          trust level enforced by both route tables and security groups — defense in depth,
+          not reliance on a single control.
+        </p>
+
+        <div class="diagram-placeholder">
+          <p class="diagram-placeholder__label">VPC / Networking Diagram</p>
+          <p>Three-tier subnet layout, AZ distribution, route tables, endpoints — to be added</p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Tier</th><th>Subnets</th><th>Hosts</th><th>Internet</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Public</td>
+                <td><code>10.0.1–3.0/24</code></td>
+                <td>ALB, NAT Gateway</td>
+                <td>Inbound + outbound via IGW</td>
+              </tr>
+              <tr>
+                <td>Private App</td>
+                <td><code>10.0.11–13.0/24</code></td>
+                <td>ECS Fargate tasks</td>
+                <td>Outbound only via NAT Gateway</td>
+              </tr>
+              <tr>
+                <td>Private Data</td>
+                <td><code>10.0.21–23.0/24</code></td>
+                <td>ElastiCache Redis</td>
+                <td>None — no internet route</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Why Three Tiers?</h3>
+        <p>
+          A common simplification is two tiers (public + private). The third tier adds
+          explicit network-level enforcement that Redis is unreachable from anywhere except
+          the app tier. Security groups already enforce this, but route tables in the data
+          subnets have <em>no</em> <code>0.0.0.0/0</code> entry — there is no internet path
+          even if a security group rule were misconfigured. Two independent controls are
+          better than one.
+        </p>
+
+        <h3>NAT Gateway Strategy</h3>
+        <p>
+          A single NAT Gateway handles outbound internet from the private app subnets.
+          This introduces a single-AZ egress dependency — accepted for the portfolio phase.
+          The Terraform VPC module accepts <code>nat_gateway_mode = "single" | "per_az"</code>
+          so switching to per-AZ NAT (and the ~$32/month additional cost) requires one
+          variable change. See <a href="https://github.com/timtimtim87/CHESSCHAT_V2/blob/main/docs/adr/0001-single-nat-gateway.md" target="_blank" rel="noopener">ADR-0001 ↗</a>.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Security Groups ───────────────────────────────── -->
+      <section id="security-groups">
+        <h2>Security Groups</h2>
+        <p>
+          Security groups enforce a strict one-directional trust chain. Each layer accepts
+          traffic only from the layer directly above it — no lateral movement is possible.
+        </p>
+        <pre>Internet (0.0.0.0/0)
+  │  443 / 80
+  ▼
+ALB Security Group
+  │  8080 (app container port)
+  ▼
+Fargate Task Security Group
+  │  6379 (Redis)
+  ▼
+Redis Security Group</pre>
+        <p>
+          The Redis security group source is the Fargate task security group ID, not a CIDR
+          block. This means any new Fargate task automatically inherits access when it joins
+          the security group, and no IP management is required as tasks scale.
+        </p>
+        <p>
+          A separate VPC Endpoint security group allows port 443 from the VPC CIDR
+          (<code>10.0.0.0/16</code>) to reach AWS service endpoints — ECR, CloudWatch Logs,
+          Secrets Manager.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── VPC Endpoints ─────────────────────────────────── -->
+      <section id="vpc-endpoints">
+        <h2>VPC Endpoints</h2>
+        <p>
+          AWS API calls from Fargate tasks route through VPC Endpoints rather than the NAT
+          Gateway. This eliminates NAT data processing charges on ECR image pulls, CloudWatch
+          log writes, and Secrets Manager reads — and keeps traffic inside the AWS network.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Endpoint</th><th>Type</th><th>Cost</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td>S3</td><td>Gateway</td><td>Free</td><td>ECR image layer storage, static assets</td></tr>
+              <tr><td>DynamoDB</td><td>Gateway</td><td>Free</td><td>Database access from app tier</td></tr>
+              <tr><td>ECR API</td><td>Interface</td><td>~$7/mo</td><td>Container image metadata</td></tr>
+              <tr><td>ECR Docker</td><td>Interface</td><td>~$7/mo</td><td>Container image pull</td></tr>
+              <tr><td>CloudWatch Logs</td><td>Interface</td><td>~$7/mo</td><td>Application log delivery</td></tr>
+              <tr><td>Secrets Manager</td><td>Interface</td><td>~$7/mo</td><td>Redis auth token at task startup</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Gateway endpoints are free and route traffic through the AWS backbone without
+          leaving the VPC. Interface endpoints cost ~$7/month each but eliminate NAT data
+          charges that would exceed this on any meaningful ECR pull volume.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Terraform Structure ───────────────────────────── -->
+      <section id="terraform-structure">
+        <h2>Terraform Structure</h2>
+        <p>
+          All infrastructure is defined in Terraform with a modular structure — one module
+          per AWS service boundary. The root <code>main.tf</code> wires modules together,
+          passing outputs as inputs (e.g. VPC subnet IDs feed into ECS and ElastiCache).
+        </p>
+        <pre>terraform/
+├── modules/
+│   ├── vpc/          # VPC, subnets, IGW, NAT, route tables, endpoints
+│   ├── ecs/          # Cluster identity, IAM roles, security groups
+│   ├── ecs_compute/  # Task definitions, ECS service, autoscaling
+│   ├── alb/          # ALB, target groups, listeners, ACM cert
+│   ├── dynamodb/     # All DynamoDB tables and GSIs
+│   ├── elasticache/  # Redis replication group, subnet group, param group
+│   ├── cognito/      # User pool, app client, Google IdP
+│   ├── route53/      # Hosted zone, alias records, ACM validation
+│   └── monitoring/   # CloudWatch alarms, dashboards, SNS, budgets
+├── environments/dev/
+│   └── terraform.tfvars
+├── main.tf           # Module wiring
+├── backend.tf        # S3 remote state config
+└── versions.tf       # Provider version pins</pre>
+
+        <div class="callout">
+          <strong>ECS split into two modules.</strong> The ECS identity module (<code>ecs/</code>)
+          creates the cluster, IAM roles, and security groups. The ECS compute module
+          (<code>ecs_compute/</code>) creates task definitions and the service. This split
+          breaks a circular dependency: the Redis security group needs to allow the Fargate
+          task security group as a source, but the task definition needs the Redis endpoint.
+          Separating the resources removes the cycle.
+        </div>
+
+        <h3>Module Outputs as Inputs</h3>
+        <p>
+          Modules expose typed outputs that other modules consume directly. For example:
+        </p>
+        <pre># In main.tf
+module "elasticache" {
+  source             = "./modules/elasticache"
+  private_data_subnet_ids = module.vpc.private_data_subnet_ids
+  fargate_sg_id      = module.ecs.fargate_task_sg_id
+}
+
+module "ecs_compute" {
+  source         = "./modules/ecs_compute"
+  redis_endpoint = module.elasticache.primary_endpoint
+  redis_secret_arn = module.elasticache.auth_token_secret_arn
+}</pre>
+        <p>
+          This wiring means Terraform's dependency graph is explicit — it knows to create
+          ElastiCache before the ECS service, and to destroy the ECS service before ElastiCache.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Remote State ──────────────────────────────────── -->
+      <section id="remote-state">
+        <h2>Remote State</h2>
+        <p>
+          Terraform state is stored in S3 with versioning enabled and file-based locking
+          (<code>use_lockfile = true</code>). State versioning means any previous infrastructure
+          state can be restored from S3 version history if needed.
+        </p>
+        <pre># backend.tf
+terraform {
+  backend "s3" {
+    bucket       = "chesschat-tfstate-723580627470-us-east-1"
+    key          = "dev/terraform.tfstate"
+    region       = "us-east-1"
+    use_lockfile = true
+  }
+}</pre>
+        <p>
+          The state bucket name includes the AWS account ID to guarantee global uniqueness
+          without a random suffix that would need to be tracked separately.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── CI/CD ─────────────────────────────────────────── -->
+      <section id="cicd">
+        <h2>CI/CD Pipeline</h2>
+        <p>
+          GitHub Actions handles continuous deployment. Authentication to AWS uses OIDC
+          (OpenID Connect) — no long-lived access keys are stored as GitHub secrets. Instead,
+          GitHub's OIDC provider is trusted by an IAM role, and the workflow assumes that role
+          for the duration of the pipeline run.
+        </p>
+        <div class="diagram-placeholder">
+          <p class="diagram-placeholder__label">CI/CD Flow Diagram</p>
+          <p>GitHub Actions → OIDC → AWS → ECR push → ECS deploy — to be added</p>
+        </div>
+        <p>Pipeline stages on push to <code>main</code>:</p>
+        <ol>
+          <li>Run frontend tests (<code>vitest</code>)</li>
+          <li>Build Docker image</li>
+          <li>Authenticate to AWS via OIDC</li>
+          <li>Push image to ECR with commit SHA tag</li>
+          <li>Update ECS task definition to new image tag</li>
+          <li>Deploy new ECS service revision (rolling update)</li>
+          <li>Static site assets synced to S3 + CloudFront invalidation</li>
+        </ol>
+        <p>
+          The static site deploy (Step 7) and the ECS deploy (Steps 4–6) are independent
+          pipelines — a frontend-only change does not trigger an ECS deployment.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Redis vs DynamoDB ─────────────────────────────── -->
+      <section id="data-split">
+        <h2>Redis vs DynamoDB — The Split</h2>
+        <p>
+          The platform uses two data stores with deliberately separate responsibilities.
+          The guiding principle: <strong>Redis holds what is needed right now; DynamoDB
+          holds what needs to be remembered.</strong>
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Data</th><th>Store</th><th>Reason</th></tr></thead>
+            <tbody>
+              <tr><td>Active room metadata</td><td>Redis (TTL)</td><td>Ephemeral, fast access, irrelevant after session</td></tr>
+              <tr><td>In-progress game state</td><td>Redis (TTL)</td><td>Sub-ms read/write for move validation and clocks</td></tr>
+              <tr><td>WebSocket connection map</td><td>Redis</td><td>Shared across Fargate tasks for scalable routing</td></tr>
+              <tr><td>Completed game records</td><td>DynamoDB</td><td>Permanent, queryable by player and date</td></tr>
+              <tr><td>User profiles and stats</td><td>DynamoDB</td><td>Permanent, low write frequency</td></tr>
+              <tr><td>Social graph</td><td>DynamoDB</td><td>Permanent, structured relationships</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Importantly, DynamoDB receives exactly <strong>one write per completed game</strong>,
+          regardless of how many moves were played. All mid-game state lives in Redis.
+          This keeps DynamoDB costs proportional to games completed, not game activity.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── DynamoDB Schema ───────────────────────────────── -->
+      <section id="dynamodb-schema">
+        <h2>DynamoDB Schema</h2>
+        <p>
+          The schema uses a <strong>multi-table design</strong> — one table per domain —
+          rather than the popular single-table pattern. IAM permissions, CloudWatch metrics,
+          and PITR settings are all cleaner per-table. The social domain was also added after
+          initial design; retrofitting single-table key namespacing would have been disruptive.
+        </p>
+
+        <div class="diagram-placeholder">
+          <p class="diagram-placeholder__label">Entity Relationship Diagram</p>
+          <p>DynamoDB table relationships and GSI structure — to be added</p>
+        </div>
+
+        <h3>Users Table</h3>
+        <pre>PK: user_id (S)   ← Cognito sub (immutable UUID)
+
+Attributes: username, display_name, email,
+            chess_com_username, chess_com_verified,
+            total_games, wins, losses, draws,
+            created_at, last_login_at
+
+GSI: username-index
+  PK: username (S)</pre>
+        <div class="callout">
+          <strong>Why <code>user_id</code> as PK, not <code>username</code>?</strong>
+          Usernames can change. The chess.com OAuth integration includes a displacement mechanic
+          where a verified chess.com holder can claim a username held by an unverified user.
+          Using an immutable Cognito sub means a username change is a single
+          <code>UpdateItem</code>, not a data migration.
+        </div>
+
+        <h3>Games Table</h3>
+        <pre>PK: game_id (S)   ← UUID
+SK: ended_at (N)  ← Unix timestamp (ms)
+
+Attributes: white_player_id, black_player_id,
+            winner, result, total_moves, duration_seconds,
+            moves[], fen_history[], pgn, room_code,
+            time_white_remaining, time_black_remaining
+
+GSI-1: white-player-index   PK: white_player_id, SK: ended_at
+GSI-2: black-player-index   PK: black_player_id, SK: ended_at</pre>
+        <div class="callout">
+          <strong>Why two GSIs?</strong> A player alternates colours across games.
+          To query their full history you need games where they were white AND games where
+          they were black. DynamoDB GSI partition keys map to a single attribute — two
+          GSIs with two parallel queries (merged in the application) is the idiomatic
+          solution. A single GSI cannot serve both lookup directions.
+        </div>
+
+        <h3>Social Tables</h3>
+        <p>Four additional tables support the social layer:</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Table</th><th>PK</th><th>SK</th><th>GSIs</th></tr></thead>
+            <tbody>
+              <tr><td>Friendships</td><td><code>user_id</code></td><td><code>friend_user_id</code></td><td>None — mirrored writes</td></tr>
+              <tr><td>Friend Requests</td><td><code>recipient_user_id</code></td><td><code>request_id</code></td><td>sender-requests-index</td></tr>
+              <tr><td>Challenges</td><td><code>challenge_id</code></td><td>—</td><td>challenger-index, challenged-index</td></tr>
+              <tr><td>Notifications</td><td><code>user_id</code></td><td><code>notification_id</code></td><td>None</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Friendships are written in both directions simultaneously (A→B and B→A), so listing
+          a user's friends is a single <code>Query PK=user_id</code> with no GSI required.
+          The Challenges table mirrors the two-GSI pattern from Games — a challenge involves
+          two parties and must be visible to both.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Redis Schema ───────────────────────────────────── -->
+      <section id="redis-schema">
+        <h2>Redis Schema</h2>
+        <p>
+          Redis stores ephemeral session state. All keys have a TTL and are treated as
+          disposable — Redis state loss is survivable; DynamoDB loss is not.
+        </p>
+        <pre>room:{room_code}          Hash, TTL 60min
+  status                  waiting | active | teardown
+  chime_meeting_id
+  chime_meeting_data      JSON blob
+  participant:{uid}:*     Per-user connection fields
+  active_game             JSON blob (null if no game running)
+  games_played            JSON array of completed summaries
+
+ws:{connection_id}        Hash, TTL 60min
+  user_id
+  room_code
+  connected_at</pre>
+        <p>
+          WebSocket connection state lives in Redis (not in Fargate task memory) so that
+          any task can look up any connection. This is the foundation for distributed
+          WebSocket routing when the single-task guardrail is lifted.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Data Flow ──────────────────────────────────────── -->
+      <section id="data-flow">
+        <h2>Data Flow</h2>
+
+        <div class="diagram-placeholder">
+          <p class="diagram-placeholder__label">Data Flow Diagram</p>
+          <p>Request path from browser through CloudFront / ALB to Fargate, Redis, DynamoDB — to be added</p>
+        </div>
+
+        <h3>Room Creation</h3>
+        <ol>
+          <li>User A clicks Create Room → WebSocket message to Fargate</li>
+          <li>Backend generates 8-char alphanumeric room code</li>
+          <li>Room written to Redis with 60-minute TTL</li>
+          <li>Room code returned to User A's browser</li>
+          <li>User B enters code → backend validates room exists</li>
+          <li>Backend creates Chime SDK meeting, generates attendee tokens for both</li>
+          <li>Meeting credentials pushed to both clients via WebSocket</li>
+          <li>Chime SDK initialises on both frontends — video active</li>
+        </ol>
+
+        <h3>Chess Move</h3>
+        <ol>
+          <li>Player drags piece — chess.js validates move locally (UX speed)</li>
+          <li>Move sent to backend via WebSocket: <code>{ move: "e2e4" }</code></li>
+          <li>Backend validates server-side with Stockfish (security)</li>
+          <li>Board FEN, move list, and clocks updated in Redis</li>
+          <li>Move broadcast to both clients: <code>move_made</code> event with audio metadata</li>
+          <li>Both frontends update board, clocks, and play sound cue</li>
+        </ol>
+
+        <h3>Game Completion</h3>
+        <ol>
+          <li>End condition detected (checkmate / resignation / timeout)</li>
+          <li>Game metadata calculated (duration, time remaining, move count)</li>
+          <li>Game record written to DynamoDB — single <code>PutItem</code></li>
+          <li>User stats updated — <code>UpdateItem</code> on Users table</li>
+          <li>Active game cleared from Redis room state</li>
+          <li><code>game_ended</code> event broadcast to both clients</li>
+        </ol>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Session Lifecycle ─────────────────────────────── -->
+      <section id="session-lifecycle">
+        <h2>Session Lifecycle</h2>
+        <p>
+          Rooms follow phone-call semantics. The lifecycle is deterministic with no
+          ambiguous intermediate states.
+        </p>
+        <pre>Room created (User A)
+  │  status: waiting
+  ▼
+User B joins
+  │  status: active — Chime meeting created
+  ▼
+Games played (unlimited sequential games)
+  │  Each game: Redis active_game → DynamoDB on completion
+  ▼
+Player disconnects
+  │  12-second reconnect grace
+  │  If grace expires → teardown begins
+  ▼
+Both players leave (or grace expires)
+  │  Chime meeting deleted
+  │  Active game (if any) written to DynamoDB as abandonment
+  │  Redis room key deleted
+  ▼
+Room consumed — code is single-use</pre>
+        <p>
+          The tombstone (record that the room existed and was torn down) is written atomically
+          with the Redis deletion to prevent race conditions on room code reuse.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── WebSocket ──────────────────────────────────────── -->
+      <section id="websocket">
+        <h2>WebSocket Routing</h2>
+        <p>
+          WebSocket connections require session affinity — a client must reach the same
+          Fargate task to maintain its connection. The ALB target group has sticky sessions
+          enabled (<code>lb_cookie</code>, 24-hour duration).
+        </p>
+        <div class="callout callout--warn">
+          <strong>Current scaling constraint.</strong> WebSocket routing is single-task until
+          a Redis pub/sub message relay is implemented. At that point, any task can relay
+          messages to any other task and sticky sessions become a preference, not a requirement.
+          This constraint is documented and the upgrade path is clear.
+        </div>
+        <p>
+          Connection state is stored in Redis (not task memory), so the foundation for
+          distributed routing is already in place. Implementing the pub/sub relay is the
+          remaining step.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Video ──────────────────────────────────────────── -->
+      <section id="video">
+        <h2>Video Infrastructure</h2>
+        <h3>Current: Amazon Chime SDK</h3>
+        <p>
+          Chime SDK provides a managed WebRTC implementation. The server creates a meeting
+          and issues attendee tokens; the client SDK handles negotiation, STUN/TURN, and
+          media streams. Cost: <strong>$0.0017 per attendee-minute</strong>.
+        </p>
+        <p>
+          A 1-hour session with two players = 120 attendee-minutes = $0.20 per session.
+        </p>
+
+        <h3>Planned: Native WebRTC + Coturn</h3>
+        <p>
+          The migration replaces Chime SDK with browser-native WebRTC and a self-hosted
+          Coturn TURN server. Cost becomes a flat EC2 instance fee rather than per-minute billing.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th></th><th>Chime SDK</th><th>WebRTC + Coturn</th></tr></thead>
+            <tbody>
+              <tr><td>Cost model</td><td>$0.0017/attendee-min</td><td>Flat EC2 (~$15–30/mo)</td></tr>
+              <tr><td>Break-even</td><td>—</td><td>~150 hours/month of video</td></tr>
+              <tr><td>Control</td><td>Managed (limited)</td><td>Full (codec, bitrate, signalling)</td></tr>
+              <tr><td>TURN required</td><td>Managed by Chime</td><td>Self-hosted (~15% of sessions)</td></tr>
+              <tr><td>SFU needed</td><td>No (1-on-1)</td><td>No (1-on-1)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Migration sequence: keep Chime now → swap to WebRTC + single Coturn instance
+          pre-launch → add redundancy post-launch → add regional instances based on user
+          geography.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Security ───────────────────────────────────────── -->
+      <section id="security">
+        <h2>Security Model</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Control</th><th>Implementation</th></tr></thead>
+            <tbody>
+              <tr><td>Network isolation</td><td>Three-tier VPC, private subnets for app and data planes</td></tr>
+              <tr><td>Least-privilege IAM</td><td>Separate task execution role (ECR/logs/secrets) and task role (DynamoDB/Redis/Chime)</td></tr>
+              <tr><td>Secrets management</td><td>Secrets Manager for Redis auth token and third-party API keys — never in env vars</td></tr>
+              <tr><td>TLS everywhere</td><td>ACM certificates on ALB and CloudFront, HTTP → HTTPS redirect enforced</td></tr>
+              <tr><td>Container security</td><td>ECR image scanning on push, lifecycle policy (retain last 10 images)</td></tr>
+              <tr><td>Encryption at rest</td><td>DynamoDB SSE (AWS-managed), Redis encryption at rest enabled</td></tr>
+              <tr><td>Auth</td><td>Cognito with email verification, password complexity, optional MFA</td></tr>
+              <tr><td>Audit</td><td>CloudTrail (all API calls), VPC Flow Logs, CloudWatch application logs</td></tr>
+              <tr><td>Static site isolation</td><td>S3 bucket private, CloudFront OAC — bucket accessible only from this distribution</td></tr>
+              <tr><td>Session cookie (v1)</td><td>JS-managed cross-subdomain cookie — accepted risk, HttpOnly migration planned (ADR-0003)</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>IAM Role Separation</h3>
+        <p>
+          ECS uses two distinct IAM roles per task:
+        </p>
+        <ul>
+          <li><strong>Task Execution Role</strong> — used by the ECS agent to pull the container image from ECR, write logs to CloudWatch, and fetch secrets from Secrets Manager at startup. The application code never uses this role.</li>
+          <li><strong>Task Role</strong> — used by the application at runtime. Grants access to specific DynamoDB table ARNs, Chime SDK meeting operations, and ElastiCache describe operations. No wildcard resources.</li>
+        </ul>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Observability ──────────────────────────────────── -->
+      <section id="observability">
+        <h2>Observability</h2>
+        <h3>Alarms</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Metric</th><th>Threshold</th><th>Severity</th></tr></thead>
+            <tbody>
+              <tr><td>ECS CPU utilisation</td><td>&gt; 80% for 5 min</td><td>Warning</td></tr>
+              <tr><td>ECS CPU utilisation</td><td>&gt; 95% for 5 min</td><td>Critical</td></tr>
+              <tr><td>ECS memory utilisation</td><td>&gt; 85% for 5 min</td><td>Warning</td></tr>
+              <tr><td>ALB 5xx errors</td><td>&gt; 10 in 5 min</td><td>Critical</td></tr>
+              <tr><td>ALB unhealthy targets</td><td>&gt; 0 for 2 min</td><td>Critical</td></tr>
+              <tr><td>DynamoDB throttled requests</td><td>Any</td><td>Warning</td></tr>
+              <tr><td>Redis CPU</td><td>&gt; 90% for 10 min</td><td>Critical</td></tr>
+              <tr><td>Daily cost</td><td>&gt; $10/day</td><td>Budget alert</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>Logging</h3>
+        <p>
+          Application logs write to CloudWatch Logs via the <code>awslogs</code> driver in
+          the ECS task definition. Log group <code>/ecs/chesschat/application</code>,
+          30-day retention. VPC Flow Logs write all traffic to a separate log group,
+          7-day retention.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Cost Model ─────────────────────────────────────── -->
+      <section id="cost">
+        <h2>Cost Model</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Service</th><th>Monthly (portfolio phase)</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td>NAT Gateway (1x)</td><td>~$35</td><td>Fixed + data transfer</td></tr>
+              <tr><td>ECS Fargate (2 tasks baseline)</td><td>~$26</td><td>Scales with load</td></tr>
+              <tr><td>ALB</td><td>~$21</td><td>Fixed + LCU charges</td></tr>
+              <tr><td>ElastiCache Redis</td><td>~$22</td><td>1 primary + 1 replica, t4g.micro</td></tr>
+              <tr><td>VPC Interface Endpoints (4x)</td><td>~$28</td><td>Eliminates NAT data charges on AWS API calls</td></tr>
+              <tr><td>Chime SDK</td><td>~$10–40</td><td>Variable — $0.0017/attendee-min</td></tr>
+              <tr><td>DynamoDB (on-demand)</td><td>~$5</td><td>Scales with usage</td></tr>
+              <tr><td>CloudWatch, Route 53, misc</td><td>~$5</td><td></td></tr>
+              <tr><td><strong>Total</strong></td><td><strong>~$150–180</strong></td><td>Portfolio phase</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          The WebRTC + Coturn migration eliminates Chime SDK costs entirely, replacing them
+          with a flat ~$15–30/month EC2 instance. Break-even is approximately 150 hours/month
+          of active video — well within reach at any meaningful user base.
+        </p>
+
+        <div style="padding-bottom: 3rem;"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <p>© 2025 Tim Hewitt</p>
+      <ul class="site-footer__links">
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn</a></li>
+        <li><a href="mailto:tim.antibes@gmail.com">Email</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <!-- Sidebar scroll-spy -->
+  <script>
+    const sections = document.querySelectorAll('.page-content section[id]');
+    const navLinks = document.querySelectorAll('#toc a');
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          navLinks.forEach(link => {
+            link.classList.toggle('active', link.getAttribute('href') === '#' + entry.target.id);
+          });
+        }
+      });
+    }, { rootMargin: '-20% 0px -70% 0px' });
+
+    sections.forEach(section => observer.observe(section));
+  </script>
+
+</body>
+</html>

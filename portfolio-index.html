@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tim Hewitt — AWS Solutions Architect</title>
+  <meta name="description" content="AWS Solutions Architect portfolio — production-grade cloud infrastructure projects." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- ── Nav ──────────────────────────────────────────────── -->
+  <nav class="site-nav">
+    <div class="site-nav__inner">
+      <a href="/" class="site-nav__logo">tim hewitt</a>
+      <ul class="site-nav__links">
+        <li><a href="#projects">Projects</a></li>
+        <li><a href="#about">About</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn ↗</a></li>
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- ── Hero ─────────────────────────────────────────────── -->
+  <section class="hero">
+    <div class="container">
+      <p class="hero__mono">AWS Solutions Architect · Melbourne, Australia</p>
+      <h1 class="hero__name">Tim Hewitt</h1>
+      <p class="hero__bio">
+        <!-- PLACEHOLDER: Add your 2–3 line transition story here.
+             Example format:
+             "I spent X years in [previous field], then [pivot moment].
+             Now I design and build production systems on AWS, with a focus on
+             [what you care about — e.g. infrastructure design, cost-conscious architecture]." -->
+        [Your transition story goes here — where you came from, why AWS, what drives you.]
+      </p>
+      <div class="hero__links">
+        <a href="https://www.linkedin.com/in/timtimtim87/" class="btn btn--primary" target="_blank" rel="noopener">LinkedIn ↗</a>
+        <a href="https://github.com/timtimtim87" class="btn btn--outline" target="_blank" rel="noopener">GitHub</a>
+        <a href="mailto:tim.antibes@gmail.com" class="btn btn--outline">Get in touch</a>
+      </div>
+    </div>
+  </section>
+
+  <main>
+
+    <!-- ── Projects ──────────────────────────────────────── -->
+    <section id="projects" style="padding: 4rem 0;">
+      <div class="container--wide">
+
+        <p class="section-label">Projects</p>
+
+        <div class="project-grid">
+
+          <!-- ChessChat -->
+          <div class="card">
+            <p class="card__eyebrow">Flagship Project</p>
+            <h2 class="card__title" style="font-size:1.25rem;">ChessChat</h2>
+            <p class="card__desc">
+              Real-time video chess platform built on a three-tier AWS VPC. Production infrastructure
+              with a genuine commercial model — subscription billing, referral mechanics, and a
+              sponsorship model that scales with usage.
+            </p>
+            <div class="tags">
+              <span class="tag">ECS Fargate</span>
+              <span class="tag">VPC</span>
+              <span class="tag">DynamoDB</span>
+              <span class="tag">ElastiCache</span>
+              <span class="tag">Cognito</span>
+              <span class="tag">CloudFront</span>
+              <span class="tag">Terraform</span>
+            </div>
+            <div style="margin-top:1rem;">
+              <span class="status status--wip">In progress</span>
+            </div>
+            <div class="card__links">
+              <a href="chesschat/">Overview →</a>
+              <a href="chesschat/technical.html">Technical deep-dive →</a>
+              <a href="https://github.com/timtimtim87/CHESSCHAT_V2" target="_blank" rel="noopener">GitHub ↗</a>
+            </div>
+          </div>
+
+          <!-- Stock Screener -->
+          <div class="card">
+            <p class="card__eyebrow">Serverless · Data Pipeline</p>
+            <h2 class="card__title" style="font-size:1.25rem;">AWS Stock Screener</h2>
+            <p class="card__desc">
+              Serverless stock screening and portfolio tracker with Telegram bot interface.
+              Built to solve a real personal trading problem — demonstrates right-sizing:
+              S3 over RDS, Lambda over EC2, pay-per-execution over always-on.
+            </p>
+            <div class="tags">
+              <span class="tag">Lambda</span>
+              <span class="tag">EventBridge</span>
+              <span class="tag">API Gateway</span>
+              <span class="tag">S3</span>
+              <span class="tag">Parameter Store</span>
+              <span class="tag">SAM</span>
+            </div>
+            <div style="margin-top:1rem;">
+              <span class="status status--live">Live</span>
+            </div>
+            <div class="card__links">
+              <a href="stock-screener/">Overview →</a>
+              <a href="stock-screener/technical.html">Technical deep-dive →</a>
+              <a href="https://github.com/timtimtim87/STOCK-SCREENER" target="_blank" rel="noopener">GitHub ↗</a>
+            </div>
+          </div>
+
+          <!-- Sudoku -->
+          <div class="card">
+            <p class="card__eyebrow">AI Integration · Serverless</p>
+            <h2 class="card__title" style="font-size:1.25rem;">SUDOKOO</h2>
+            <p class="card__desc">
+              AI-powered Sudoku web app using Amazon Bedrock with Claude 3.5 Sonnet for
+              computer vision puzzle extraction. Demonstrates managed AI integration and
+              the tradeoffs between Bedrock, Rekognition, and custom ML models.
+            </p>
+            <div class="tags">
+              <span class="tag">Bedrock</span>
+              <span class="tag">Lambda</span>
+              <span class="tag">CloudFront</span>
+              <span class="tag">API Gateway</span>
+              <span class="tag">S3</span>
+            </div>
+            <div style="margin-top:1rem;">
+              <span class="status status--live">Live</span>
+            </div>
+            <div class="card__links">
+              <a href="sudoku/">Overview →</a>
+              <a href="sudoku/technical.html">Technical deep-dive →</a>
+              <a href="https://github.com/timtimtim87/SUDOKOO" target="_blank" rel="noopener">GitHub ↗</a>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ── About ──────────────────────────────────────────── -->
+    <section id="about" style="padding: 4rem 0; border-top: 1px solid var(--border);">
+      <div class="container">
+        <p class="section-label">About</p>
+
+        <!-- PLACEHOLDER: transition story (same as hero, longer form here) -->
+        <p style="font-size:1.05rem; max-width:600px; line-height:1.8;">
+          [Extended version of your transition story goes here. 3–4 sentences.
+          Where you came from, the pivot moment, what you're building toward.]
+        </p>
+
+        <p style="margin-top:1.5rem; font-size:0.95rem; color:var(--text-muted);">
+          <!-- PLACEHOLDER: Add certifications when you have them -->
+          <strong>AWS Certified Solutions Architect – Associate</strong> · 2025
+        </p>
+
+        <div style="margin-top:2rem; display:flex; gap:1rem; flex-wrap:wrap;">
+          <a href="https://www.linkedin.com/in/timtimtim87/" class="btn btn--outline" target="_blank" rel="noopener">LinkedIn ↗</a>
+          <a href="https://github.com/timtimtim87" class="btn btn--outline" target="_blank" rel="noopener">GitHub ↗</a>
+          <a href="mailto:tim.antibes@gmail.com" class="btn btn--outline">Email</a>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── Footer ────────────────────────────────────────────── -->
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <p>© 2025 Tim Hewitt</p>
+      <ul class="site-footer__links">
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn</a></li>
+        <li><a href="mailto:tim.antibes@gmail.com">Email</a></li>
+      </ul>
+    </div>
+  </footer>
+
+</body>
+</html>

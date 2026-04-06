@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stock Screener — Technical Deep-Dive</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+
+  <nav class="site-nav">
+    <div class="site-nav__inner">
+      <a href="/" class="site-nav__logo">tim hewitt</a>
+      <ul class="site-nav__links">
+        <li><a href="/#projects">Projects</a></li>
+        <li><a href="/#about">About</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn ↗</a></li>
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="container">
+    <header class="page-header">
+      <p class="page-header__eyebrow"><a href="index.html">Stock Screener</a> · Technical Deep-Dive</p>
+      <h1 class="page-header__title" style="font-size:clamp(1.6rem,4vw,2.25rem);">IaC, Data Flow &amp; Service Configuration</h1>
+      <p class="page-header__subtitle">
+        SAM template structure, Lambda configuration, IAM design,
+        data pipeline flow, and operational learnings.
+      </p>
+      <div style="margin-top:1rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
+        <a href="index.html" class="btn btn--outline" style="font-size:0.82rem;">← Project overview</a>
+        <a href="https://github.com/timtimtim87/STOCK-SCREENER" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+    </header>
+  </div>
+
+  <div class="page-layout">
+
+    <aside class="page-sidebar">
+      <p class="page-sidebar__title">Contents</p>
+      <nav id="toc">
+        <span class="nav-section">Infrastructure</span>
+        <a href="#sam">SAM Template Structure</a>
+        <a href="#iam">IAM Design</a>
+        <a href="#network">Network Architecture</a>
+
+        <span class="nav-section">Services</span>
+        <a href="#lambda-config">Lambda Configuration</a>
+        <a href="#eventbridge">EventBridge Scheduling</a>
+        <a href="#s3-storage">S3 Storage Design</a>
+        <a href="#parameter-store">Parameter Store</a>
+
+        <span class="nav-section">Data</span>
+        <a href="#data-flow">Data Flow</a>
+        <a href="#telegram">Telegram Bot</a>
+
+        <span class="nav-section">Operations</span>
+        <a href="#cost">Cost Breakdown</a>
+        <a href="#learnings">Operational Learnings</a>
+      </nav>
+    </aside>
+
+    <main class="page-content">
+
+      <section id="sam">
+        <h2>SAM Template Structure</h2>
+        <p>
+          The entire system deploys through AWS SAM (Serverless Application Model), which
+          extends CloudFormation with higher-level constructs for serverless resources.
+          A single <code>template.yaml</code> defines both Lambda functions, their IAM roles,
+          EventBridge scheduling, API Gateway configuration, and S3 bucket setup.
+        </p>
+        <pre>template.yaml defines:
+  ├── DataCollectorFunction
+  │   ├── Runtime: python3.11
+  │   ├── Memory: 1024 MB
+  │   ├── Timeout: 300s
+  │   ├── Events: EventBridgeRule (cron)
+  │   └── Role: DataCollectorRole
+  │
+  ├── TelegramBotFunction
+  │   ├── Runtime: python3.11
+  │   ├── Memory: 512 MB
+  │   ├── Timeout: 30s
+  │   ├── Events: ApiGatewayWebhook
+  │   └── Role: TelegramBotRole
+  │
+  ├── DataBucket (S3)
+  │   ├── SSE-S3 encryption
+  │   ├── Versioning: Suspended (lifecycle policy cleans non-current)
+  │   └── LifecyclePolicy: delete non-current versions after 1 day
+  │
+  └── WebhookApi (API Gateway)
+      └── POST /webhook → TelegramBotFunction</pre>
+        <p>
+          Deploying changes is <code>sam build &amp;&amp; sam deploy</code> — SAM packages
+          the Lambda code, uploads it to S3, and updates the CloudFormation stack.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <section id="iam">
+        <h2>IAM Design</h2>
+        <p>
+          Each Lambda function has its own IAM execution role with the minimum permissions
+          required. The two roles are kept strictly separate — the bot cannot write data,
+          the collector cannot receive API Gateway events.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Role</th><th>Permissions</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>DataCollectorRole</td>
+                <td>
+                  <code>s3:PutObject</code> on data bucket<br/>
+                  <code>ssm:GetParameter</code> on Polygon + Alpaca parameter paths<br/>
+                  <code>logs:*</code> on its own log group
+                </td>
+              </tr>
+              <tr>
+                <td>TelegramBotRole</td>
+                <td>
+                  <code>s3:GetObject</code> on data bucket (read-only)<br/>
+                  <code>ssm:GetParameter</code> on Telegram + Alpaca parameter paths<br/>
+                  <code>logs:*</code> on its own log group
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Resource ARNs are scoped to specific S3 bucket paths and specific Parameter Store
+          parameter names — not wildcard <code>*</code> resources. If either function were
+          compromised, blast radius is limited to that function's explicit permissions.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <section id="network">
+        <h2>Network Architecture</h2>
+        <p>
+          Both Lambda functions run in AWS's default managed environment — no VPC
+          configuration. This is a deliberate cost decision.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Option</th><th>Monthly cost</th><th>Why rejected</th></tr></thead>
+            <tbody>
+              <tr><td>No VPC (current)</td><td>$0</td><td>—</td></tr>
+              <tr><td>VPC + NAT Gateway</td><td>~$45</td><td>Disproportionate for personal tool</td></tr>
+              <tr><td>VPC + Interface Endpoints</td><td>~$14+</td><td>Same — overkill for this workload</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Lambda accesses S3 and Parameter Store through AWS internal service endpoints —
+          traffic routes over AWS's backbone without traversing the public internet.
+          External API calls to Polygon, Alpaca, and Telegram use standard HTTPS.
+          For a personal trading tool, this is the correct tradeoff.
+        </p>
+        <div class="callout">
+          <strong>When VPC would make sense.</strong> If this system handled PII, processed
+          financial transactions, or needed to access resources inside a private network
+          (e.g. a private RDS instance), VPC deployment would be justified. For Lambda
+          reading and writing CSV files and calling public APIs, it adds no security value.
+        </div>
+      </section>
+
+      <hr class="section-divider" />
+
+      <section id="lambda-config">
+        <h2>Lambda Configuration</h2>
+        <h3>Memory Sizing</h3>
+        <p>
+          The data collector is configured at 1024 MB — generous for the workload, but
+          Lambda billing is GB-seconds, and given one execution per day the cost impact
+          is negligible (well within free tier). The bot function runs at 512 MB; CloudWatch
+          logs show it uses ~170 MB in practice, suggesting headroom exists.
+        </p>
+        <pre># CloudWatch log example (bot function)
+Duration: 2099.62 ms
+Billed Duration: 5455 ms
+Memory Size: 512 MB
+Max Memory Used: 170 MB
+Init Duration: 3354.69 ms   ← cold start</pre>
+        <h3>Cold Starts</h3>
+        <p>
+          Cold starts add 3–4 seconds on the first invocation. For a daily data collection
+          job or an on-demand Telegram bot, this is acceptable. A user waiting 5 seconds
+          for their /daily command is a minor inconvenience. Optimising cold starts
+          (Lambda layers, smaller packages, provisioned concurrency) is not worth the
+          added complexity at this usage scale.
+        </p>
+        <h3>Timeouts</h3>
+        <p>
+          Data collector: 300 seconds. This accommodates fetching 1,000 stock prices from
+          an external API with retry logic for rate limiting. Bot function: 30 seconds,
+          sufficient for S3 reads and Alpaca API calls.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <section id="eventbridge">
+        <h2>EventBridge Scheduling</h2>
+        <p>
+          The data collector triggers daily at 11 AM UTC via an EventBridge cron rule.
+          This is after US market open (9:30 AM ET) to ensure previous day's EOD data
+          is available from Polygon.
+        </p>
+        <pre>ScheduleExpression: cron(0 11 * * ? *)</pre>
+        <p>
+          EventBridge delivers the event to the Lambda function. If the invocation fails,
+          Lambda has built-in retry logic (2 retries by default for async invocations).
+          A dead-letter queue could capture failed events for later inspection — not
+          implemented in v1 but a natural next step.
+        </p>
+        <div class="callout callout--warn">
+          <strong>Silent failure discovered post-deployment.</strong> When the Polygon
+          subscription lapsed, the Lambda function executed successfully, logged
+          "downloaded data for 0 stocks," and reported success. No alarm fired.
+          The fix: validate that ingested data has today's date before writing to S3.
+          A freshness check on the response timestamp would have caught this immediately.
+        </div>
+      </section>
+
+      <hr class="section-divider" />
+
+      <section id="s3-storage">
+        <h2>S3 Storage Design</h2>
+        <p>
+          Three CSV files in one S3 bucket serve as the entire data layer:
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>File</th><th>Contents</th><th>Updated</th></tr></thead>
+            <tbody>
+              <tr><td><code>russell_1000_drawdown_results.csv</code></td><td>Full 1,000-stock universe with custom metrics</td><td>Daily (overwrite)</td></tr>
+              <tr><td><code>daily_top_candidates.csv</code></td><td>Top 10 entry signals ranked by strategy metric</td><td>Daily (overwrite)</td></tr>
+              <tr><td><code>portfolio_snapshots.csv</code></td><td>Active Alpaca positions with exit metrics</td><td>Daily (overwrite)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Files are overwritten daily — no accumulation of historical rows. Historical
+          analysis is done locally by downloading the files; S3 is not used as a time-series
+          store.
+        </p>
+        <h3>Versioning Lesson</h3>
+        <p>
+          S3 versioning was initially enabled without a lifecycle policy. Each daily overwrite
+          created a new version while retaining all previous versions — the bucket grew
+          exponentially. Versioning was suspended and a lifecycle policy was added to delete
+          non-current versions after 1 day. This should have been configured at bucket creation.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <section id="parameter-store">
+        <h2>Parameter Store</h2>
+        <p>
+          Four API credentials are stored as SecureString parameters in AWS Systems Manager
+          Parameter Store:
+        </p>
+        <pre>/stock-screener/polygon/api-key
+/stock-screener/alpaca/api-key
+/stock-screener/alpaca/api-secret
+/stock-screener/telegram/bot-token</pre>
+        <p>
+          Parameters are encrypted at rest by KMS. Lambda functions retrieve them at
+          runtime using the AWS SDK — the IAM execution role grants
+          <code>ssm:GetParameter</code> on each specific parameter ARN. No credentials
+          are stored in environment variables, Lambda configuration, or source code.
+        </p>
+        <p>
+          Parameter Store was chosen over Secrets Manager for this use case — standard
+          parameters are free, and the automatic rotation features of Secrets Manager
+          are not needed for API keys rotated manually.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <section id="data-flow">
+        <h2>Data Flow</h2>
+        <div class="diagram-placeholder">
+          <p class="diagram-placeholder__label">Data Flow Diagram</p>
+          <p>EventBridge → Lambda → Polygon API → S3 — to be added</p>
+        </div>
+        <h3>Daily Collection (11 AM UTC)</h3>
+        <ol>
+          <li>EventBridge fires cron rule, invokes Data Collector Lambda</li>
+          <li>Lambda retrieves Polygon and Alpaca API keys from Parameter Store</li>
+          <li>Fetches EOD price data for 1,000-stock Russell 1000 universe from Polygon</li>
+          <li>Calculates custom drawdown metrics and entry signal scores</li>
+          <li>Fetches active positions from Alpaca API</li>
+          <li>Calculates strategy-specific exit metrics for each position</li>
+          <li>Writes all three CSV files to S3 (overwrite)</li>
+          <li>Lambda exits — compute cost ends</li>
+        </ol>
+
+        <h3>On-Demand Query (Telegram /daily)</h3>
+        <ol>
+          <li>User sends <code>/daily</code> command in Telegram</li>
+          <li>Telegram POSTs to API Gateway webhook endpoint</li>
+          <li>API Gateway invokes Telegram Bot Lambda</li>
+          <li>Lambda retrieves Telegram bot token and Alpaca keys from Parameter Store</li>
+          <li>Reads <code>daily_top_candidates.csv</code> and <code>portfolio_snapshots.csv</code> from S3</li>
+          <li>Formats results into Telegram message (text-based, no charts)</li>
+          <li>Sends formatted message via Telegram Bot API</li>
+          <li>Lambda exits</li>
+        </ol>
+      </section>
+
+      <hr class="section-divider" />
+
+      <section id="telegram">
+        <h2>Telegram Bot Interface</h2>
+        <p>
+          Telegram's bot platform was chosen over a web dashboard for several reasons:
+          native mobile push notifications, simple text-based responses are easier to
+          implement than a charting interface, and the bot API is a straightforward
+          webhook model that maps cleanly to API Gateway + Lambda.
+        </p>
+        <p>
+          The bot initially had multiple commands. In practice, only <code>/daily</code>
+          was ever used — it returns everything relevant in one response. Unnecessary
+          commands were removed. This is an example of building to actual usage, not
+          hypothetical requirements.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <section id="cost">
+        <h2>Cost Breakdown</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Service</th><th>Monthly cost</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td>Lambda</td><td>~$0</td><td>Well within 1M request free tier</td></tr>
+              <tr><td>EventBridge</td><td>~$0</td><td>1 rule, well within free tier</td></tr>
+              <tr><td>API Gateway</td><td>~$0</td><td>Sporadic requests, free tier</td></tr>
+              <tr><td>S3</td><td>~$0.01</td><td>3 small CSV files</td></tr>
+              <tr><td>Parameter Store</td><td>~$0</td><td>Standard parameters are free</td></tr>
+              <tr><td>CloudWatch Logs</td><td>~$0.10</td><td>Minimal log volume</td></tr>
+              <tr><td>Bedrock (data collection only)</td><td>N/A</td><td>Not used in this project</td></tr>
+              <tr><td><strong>Total</strong></td><td><strong>&lt;$1/month</strong></td><td>Effectively free</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          The entire system operates within AWS free tier limits. The only meaningful cost
+          is the Polygon API subscription (~$29/month for the data feed), which is external
+          to AWS.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <section id="learnings">
+        <h2>Operational Learnings</h2>
+        <ul>
+          <li>
+            <strong>Silent failures are worse than loud failures.</strong> A Lambda that
+            completes successfully with empty output is harder to detect than one that
+            throws an exception. Data validation should be a first-class concern, not
+            an afterthought.
+          </li>
+          <li>
+            <strong>S3 versioning requires a lifecycle policy.</strong> Enabling versioning
+            without expiry rules causes unbounded storage growth on any bucket with regular
+            overwrites.
+          </li>
+          <li>
+            <strong>Tag everything from day one.</strong> Running multiple projects in one
+            account without tagging makes cost attribution and resource cleanup significantly
+            harder.
+          </li>
+          <li>
+            <strong>Match the interface to actual behaviour.</strong> The Telegram bot
+            was over-engineered with multiple commands. Real usage collapsed to one.
+            Build for what you actually need, extend when you need more.
+          </li>
+          <li>
+            <strong>Right-size the solution.</strong> S3 CSV over RDS, Lambda over EC2,
+            Parameter Store over Secrets Manager — each decision was made by asking
+            "what does this workload actually need?" not "what is the most sophisticated option?"
+          </li>
+        </ul>
+        <div style="padding-bottom: 3rem;"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <p>© 2025 Tim Hewitt</p>
+      <ul class="site-footer__links">
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn</a></li>
+        <li><a href="mailto:tim.antibes@gmail.com">Email</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <script>
+    const sections = document.querySelectorAll('.page-content section[id]');
+    const navLinks = document.querySelectorAll('#toc a');
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          navLinks.forEach(link => {
+            link.classList.toggle('active', link.getAttribute('href') === '#' + entry.target.id);
+          });
+        }
+      });
+    }, { rootMargin: '-20% 0px -70% 0px' });
+    sections.forEach(section => observer.observe(section));
+  </script>
+
+</body>
+</html>
