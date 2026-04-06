@@ -288,11 +288,8 @@ Init Duration: 3354.69 ms   ← cold start</pre>
 
       <section id="data-flow">
         <h2>Data Flow</h2>
-        <div class="diagram-placeholder">
-          <p class="diagram-placeholder__label">Data Flow Diagram</p>
-          <p>EventBridge → Lambda → Polygon API → S3 — to be added</p>
-        </div>
         <h3>Daily Collection (11 AM UTC)</h3>
+        <img src="Stock_Screener_Data_Collection_Flow.jpg" alt="Data collection flow diagram" style="width:100%; border-radius:8px; margin-bottom:1rem;" />
         <ol>
           <li>EventBridge fires cron rule, invokes Data Collector Lambda</li>
           <li>Lambda retrieves Polygon and Alpaca API keys from Parameter Store</li>
@@ -305,6 +302,7 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         </ol>
 
         <h3>On-Demand Query (Telegram /daily)</h3>
+        <img src="Stock_Screener_Bot_Flow.jpg" alt="Telegram bot query flow diagram" style="width:100%; border-radius:8px; margin-bottom:1rem;" />
         <ol>
           <li>User sends <code>/daily</code> command in Telegram</li>
           <li>Telegram POSTs to API Gateway webhook endpoint</li>
