@@ -70,10 +70,12 @@
       </video>
     </section>
 
-    <div class="diagram-placeholder" style="margin-top:2.5rem;">
-      <p class="diagram-placeholder__label">Infrastructure Diagram</p>
-      <p>Three-tier VPC architecture diagram — to be added</p>
-    </div>
+    <figure style="margin-top:2.5rem;">
+      <picture>
+        <source srcset="../chesschat-infra-dark.png" media="(prefers-color-scheme: dark)" />
+        <img src="../chesschat-infra-light.png" alt="ChessChat infrastructure diagram showing three-tier VPC, ECS Fargate, ALB, Redis, DynamoDB, CloudFront and Cognito" style="width:100%; border-radius:8px;" />
+      </picture>
+    </figure>
 
     <section style="padding-top:2.5rem;">
       <h2>What It Is</h2>
@@ -90,6 +92,13 @@
         accumulating infrastructure costs.
       </p>
     </section>
+
+    <figure style="margin-top:2rem;">
+      <picture>
+        <source srcset="../chesschat-user-flow-dark.png" media="(prefers-color-scheme: dark)" />
+        <img src="../chesschat-user-flow-light.png" alt="ChessChat user flow diagram showing room creation, video session, chess gameplay and session teardown" style="width:100%; border-radius:8px;" />
+      </picture>
+    </figure>
 
     <section style="padding-top:2rem;">
       <h2>Architecture Overview</h2>
@@ -176,25 +185,47 @@ Static landing / auth       Authenticated gameplay runtime
     </section>
 
     <section style="padding-top:2rem;">
-      <h2>Project Status</h2>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Component</th><th>Status</th></tr></thead>
-          <tbody>
-            <tr><td>VPC — 3-tier, 3-AZ, VPC endpoints, flow logs</td><td><span class="status status--live">Live</span></td></tr>
-            <tr><td>DynamoDB — Users, Games, social tables</td><td><span class="status status--live">Live</span></td></tr>
-            <tr><td>ElastiCache Redis — Multi-AZ, Secrets Manager auth token</td><td><span class="status status--live">Live</span></td></tr>
-            <tr><td>Cognito — User pool, Google OAuth, hosted UI</td><td><span class="status status--live">Live</span></td></tr>
-            <tr><td>ECS Fargate + ALB + HTTPS</td><td><span class="status status--live">Live</span></td></tr>
-            <tr><td>CloudFront + S3 static site (chess-chat.com)</td><td><span class="status status--live">Live</span></td></tr>
-            <tr><td>CI/CD — GitHub Actions with OIDC auth</td><td><span class="status status--live">Live</span></td></tr>
-            <tr><td>Chess gameplay — WebSocket, move validation, clocks, sound</td><td><span class="status status--live">Live</span></td></tr>
-            <tr><td>Social features — friends, challenges, notifications</td><td><span class="status status--wip">In progress</span></td></tr>
-            <tr><td>Chess.com OAuth integration</td><td><span class="status status--wip">Awaiting credentials</span></td></tr>
-            <tr><td>WebRTC + Coturn migration</td><td><span class="status status--planned">Planned — pre-launch</span></td></tr>
-            <tr><td>WAF</td><td><span class="status status--planned">Planned — hardening phase</span></td></tr>
-          </tbody>
-        </table>
+      <h2>How It Was Built</h2>
+      <p>The build followed infrastructure-first order — each layer unblocking the next.</p>
+
+      <div class="decision">
+        <p class="decision__label">1 · VPC &amp; Networking</p>
+        <p>Three-tier VPC across three AZs — public, private app, and private data subnets. Route tables, security groups, NAT gateway, VPC endpoints for ECR, CloudWatch, Secrets Manager, and DynamoDB.</p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">2 · Data Layer</p>
+        <p>DynamoDB tables for users, games, and the social graph. ElastiCache Redis cluster with multi-AZ replication and Secrets Manager auth token. Schema designed upfront to avoid migration pain later.</p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">3 · Auth</p>
+        <p>Cognito user pool with email/password and Google OAuth. Hosted UI for the login surface on the static site. JWT tokens used for both REST and WebSocket authentication.</p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">4 · Compute &amp; Delivery</p>
+        <p>ECS Fargate service behind an ALB with HTTPS. CloudFront + S3 for the static marketing and auth site. Route 53 for DNS, ACM for certificates on both distributions.</p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">5 · CI/CD</p>
+        <p>GitHub Actions pipeline with OIDC authentication to AWS — no stored access keys. Separate pipelines for the static site and the ECS service. ECR image tagged by commit SHA, ECS rolling deploy on push to main.</p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">6 · Chess Engine</p>
+        <p>WebSocket server handling room creation, game state, and real-time move broadcast. Client-side validation with chess.js for UX speed; server-side validation with Stockfish as the authority. Chess clocks and sound cues built into the game loop.</p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">7 · Video</p>
+        <p>Chime SDK integration for managed WebRTC. The server creates a meeting on room activation and issues attendee tokens to both players. Video runs independently of the chess session — a disconnect from one does not affect the other.</p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">8 · Social Layer</p>
+        <p>Friends, challenges, and notifications. In progress — the DynamoDB schema and backend endpoints are built; the frontend integration is partially complete.</p>
       </div>
     </section>
 
