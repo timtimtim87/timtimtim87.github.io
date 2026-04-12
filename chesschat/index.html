@@ -49,6 +49,26 @@
     </header>
 
     <section style="padding-top:2.5rem;">
+      <h2>What It Is</h2>
+      <p>
+        ChessChat lets two players compete at chess over live video using a shared room code.
+        There are no matchmaking queues or strangers — users invite people they already know,
+        and by design they have to bring an opponent.
+      </p>
+      <p>
+        The gameplay model follows <strong>phone-call session semantics</strong>: both players
+        enter a video room that persists for the session, playing as many sequential chess games
+        as they want within it. Video chat never interrupts between games. When both players
+        leave, the room tears down immediately — no stale state, no forgotten sessions
+        accumulating infrastructure costs.
+      </p>
+    </section>
+
+    <figure style="margin-top:2rem;">
+      <img src="../chesschat-user-flow-light.png" alt="ChessChat user flow diagram showing room creation, video session, chess gameplay and session teardown" style="width:100%; border-radius:8px;" />
+    </figure>
+
+    <section style="padding-top:2.5rem;">
       <h2>Demo</h2>
       <p>
         This is a functional demo of the core product — video chat and chess gameplay working together
@@ -69,36 +89,6 @@
         Your browser does not support the video element.
       </video>
     </section>
-
-    <figure style="margin-top:2.5rem;">
-      <picture>
-        <source srcset="../chesschat-infra-dark.png" media="(prefers-color-scheme: dark)" />
-        <img src="../chesschat-infra-light.png" alt="ChessChat infrastructure diagram showing three-tier VPC, ECS Fargate, ALB, Redis, DynamoDB, CloudFront and Cognito" style="width:100%; border-radius:8px;" />
-      </picture>
-    </figure>
-
-    <section style="padding-top:2.5rem;">
-      <h2>What It Is</h2>
-      <p>
-        ChessChat lets two players compete at chess over live video using a shared room code.
-        There are no matchmaking queues or strangers — users invite people they already know,
-        and by design they have to bring an opponent.
-      </p>
-      <p>
-        The gameplay model follows <strong>phone-call session semantics</strong>: both players
-        enter a video room that persists for the session, playing as many sequential chess games
-        as they want within it. Video chat never interrupts between games. When both players
-        leave, the room tears down immediately — no stale state, no forgotten sessions
-        accumulating infrastructure costs.
-      </p>
-    </section>
-
-    <figure style="margin-top:2rem;">
-      <picture>
-        <source srcset="../chesschat-user-flow-dark.png" media="(prefers-color-scheme: dark)" />
-        <img src="../chesschat-user-flow-light.png" alt="ChessChat user flow diagram showing room creation, video session, chess gameplay and session teardown" style="width:100%; border-radius:8px;" />
-      </picture>
-    </figure>
 
     <section style="padding-top:2rem;">
       <h2>Architecture Overview</h2>
@@ -130,58 +120,55 @@ Static landing / auth       Authenticated gameplay runtime
       </p>
     </section>
 
+    <figure style="margin-top:2rem;">
+      <img src="../chesschat-infra-light.png" alt="ChessChat infrastructure diagram showing three-tier VPC, ECS Fargate, ALB, Redis, DynamoDB, CloudFront and Cognito" style="width:100%; border-radius:8px;" />
+    </figure>
+
     <section style="padding-top:2rem;">
       <h2>Key Design Decisions</h2>
-      <p>Each of these was a deliberate tradeoff. Full rationale is captured in the ADRs in the repo.</p>
+      <p>
+        Each of these was a deliberate tradeoff, documented in Architecture Decision Records
+        in the <a href="https://github.com/timtimtim87/CHESSCHAT_V2" target="_blank" rel="noopener">repo</a>.
+      </p>
 
-      <div class="decision">
-        <p class="decision__label">ADR-0002 · Split-Host Architecture</p>
-        <p>
-          Separating the static auth surface from the app runtime produces a cleaner security
-          boundary, independent deployment pipelines, and a stronger architecture narrative.
-          CloudFront handles the public surface; the ALB never sees unauthenticated traffic.
-          The two hosts use different AWS delivery mechanisms by design, not convenience.
-        </p>
-      </div>
+      <h3>Split-Host Architecture</h3>
+      <p>
+        The static marketing and auth surface runs on CloudFront + S3, while the gameplay
+        runtime runs on ECS Fargate behind an ALB. Keeping them separate produces a cleaner
+        security boundary, independent deployment pipelines, and means the ALB never sees
+        unauthenticated traffic.
+      </p>
 
-      <div class="decision">
-        <p class="decision__label">ADR-0001 · Single NAT Gateway</p>
-        <p>
-          The VPC has three AZs and private subnets in each, but egress routes through one
-          NAT Gateway — saving ~$32/month at the cost of a single-AZ egress dependency.
-          The Terraform VPC module accepts a <code>nat_gateway_mode</code> variable so
-          switching to per-AZ NAT is a one-variable change, not a network redesign.
-        </p>
-      </div>
+      <h3>Single NAT Gateway</h3>
+      <p>
+        The VPC spans three AZs but egress routes through one NAT Gateway — saving ~$32/month
+        at the cost of a single-AZ egress dependency. The Terraform VPC module accepts a
+        <code>nat_gateway_mode</code> variable, so switching to per-AZ NAT is a one-variable
+        change, not a network redesign.
+      </p>
 
-      <div class="decision">
-        <p class="decision__label">ADR-0004 · Phone-Call Room Lifecycle</p>
-        <p>
-          Rooms exist only during live participation. A short 12-second reconnect grace handles
-          accidental disconnects without triggering full teardown. No rematch or room reuse —
-          players start a new room. This eliminates stale-state risk and makes video
-          infrastructure cost predictable.
-        </p>
-      </div>
+      <h3>Phone-Call Room Lifecycle</h3>
+      <p>
+        Rooms exist only during live participation. A 12-second reconnect grace handles
+        accidental disconnects without triggering teardown. No rematch or room reuse — players
+        start a new room each time. This eliminates stale-state risk and keeps video
+        infrastructure costs predictable.
+      </p>
 
-      <div class="decision">
-        <p class="decision__label">Data Layer · Redis + DynamoDB Split</p>
-        <p>
-          Active room and game state lives in Redis with TTL expiry. DynamoDB receives exactly
-          one write per completed game. Write costs scale with games completed, not moves played.
-          Redis stays small regardless of total match history volume.
-        </p>
-      </div>
+      <h3>Redis + DynamoDB Split</h3>
+      <p>
+        Active room and game state lives in Redis with TTL expiry. DynamoDB receives exactly
+        one write per completed game, regardless of how many moves were played. Write costs
+        scale with games completed, not game activity.
+      </p>
 
-      <div class="decision">
-        <p class="decision__label">Video · Chime SDK → WebRTC Migration Plan</p>
-        <p>
-          Chime SDK provided a fast path to working video. The planned migration to native
-          browser WebRTC + self-hosted Coturn eliminates per-minute billing in favour of flat
-          EC2 cost. All sessions are 1-on-1 so an SFU is never needed; only ~15% require TURN
-          relay, keeping Coturn costs predictable at any reasonable scale.
-        </p>
-      </div>
+      <h3>Chime SDK → WebRTC Migration</h3>
+      <p>
+        Chime SDK provided a fast path to working video. The planned migration to native
+        browser WebRTC with a self-hosted Coturn server eliminates per-minute billing in favour
+        of flat EC2 cost. All sessions are 1-on-1 so an SFU is never needed; only ~15% require
+        TURN relay, keeping Coturn costs predictable at any scale.
+      </p>
     </section>
 
     <section style="padding-top:2rem;">
