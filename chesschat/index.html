@@ -51,16 +51,23 @@
     <section style="padding-top:2.5rem;">
       <h2>What It Is</h2>
       <p>
-        ChessChat lets two players compete at chess over live video using a shared room code.
-        There are no matchmaking queues or strangers — users invite people they already know,
-        and by design they have to bring an opponent.
+        ChessChat lets two players play each other at chess over live video. There are no
+        matchmaking queues or strangers — users invite their friends to play against.
       </p>
       <p>
-        The gameplay model follows <strong>phone-call session semantics</strong>: both players
+        The gameplay model follows <strong>video-call session semantics</strong>: both players
         enter a video room that persists for the session, playing as many sequential chess games
-        as they want within it. Video chat never interrupts between games. When both players
-        leave, the room tears down immediately — no stale state, no forgotten sessions
-        accumulating infrastructure costs.
+        as they want (currently with a max time of 1 hour per video chat room). Video chat
+        never interrupts between games. When both players leave, the room tears down
+        immediately — no stale active rooms accumulating AWS Chime costs.
+      </p>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <p>
+        The app requires a range of functionality, and below is an image showing the logic
+        flow of different areas of the application. I'm still learning how best to create
+        diagrams, but separating each flow felt like an easier-to-read reference.
       </p>
     </section>
 
@@ -147,7 +154,7 @@ Static landing / auth       Authenticated gameplay runtime
         change, not a network redesign.
       </p>
 
-      <h3>Phone-Call Room Lifecycle</h3>
+      <h3>Video Chat Room Lifecycle</h3>
       <p>
         Rooms exist only during live participation. A 12-second reconnect grace handles
         accidental disconnects without triggering teardown. No rematch or room reuse — players
@@ -173,7 +180,15 @@ Static landing / auth       Authenticated gameplay runtime
 
     <section style="padding-top:2rem;">
       <h2>How It Was Built</h2>
-      <p>The build followed infrastructure-first order — each layer unblocking the next.</p>
+      <p>
+        The build followed infrastructure-first order — each layer unblocking the next. The
+        VPC and networking had to exist before any compute could be placed inside it. ECS and
+        the container environment came next, since the application itself runs there. The chess
+        engine and game logic were built on top of that working compute layer, and the video
+        integration followed once the core session model was stable. Building in this sequence
+        meant each decision was grounded in a working foundation rather than assumptions about
+        what would come before it.
+      </p>
 
       <div class="decision">
         <p class="decision__label">1 · VPC &amp; Networking</p>

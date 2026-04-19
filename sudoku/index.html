@@ -66,9 +66,7 @@
     <section style="padding-top:2rem;">
       <h2>Architecture Overview</h2>
       <p>
-        The system is a standard serverless web application with one unusual ingredient:
-        a Lambda function that sends a base64-encoded image to Amazon Bedrock and parses
-        the structured response into a playable puzzle grid.
+        The system is a serverless web application that uses a Lambda function to sends a base64-encoded image to Amazon Bedrock, which uses Anthropic's claude to extract and map the sudoku puzzle from the image and parse a structured response back to the application into create a playable puzzle digitally.
       </p>
       <pre>User (browser)
   │  HTTPS
@@ -146,15 +144,10 @@ Browser (renders interactive Sudoku game)</pre>
     <section style="padding-top:2rem;">
       <h2>Honest Assessment</h2>
       <p>
-        The AI extraction works approximately 50% of the time. The two main failure modes
-        are grid alignment issues (correct values in adjacent cells) and character recognition
-        errors (1 misread as 7). The built-in puzzle validation catches bad extractions before
-        loading them into the game.
+        The AI extraction works approximately 50% of the time. The two main failure modes are grid alignment errors (correct digits placed in adjacent cells) and character recognition errors (digits misread — most commonly 1 read as 7). Both produce an invalid puzzle — duplicate values in a row, column, or 3×3 box — and are caught by the built-in puzzle validation before loading into the game.
       </p>
       <p>
-        For a niche personal use case, 50% is acceptable — the alternative (marking the
-        physical newspaper) was worse. For a production application, the approach would
-        be different: Claude's structured JSON output mode would replace the current
+        For my portfolio use case, 50% is acceptable, i just wanted to learn how to integrate AI to solve this problem. For a production application, the approach would be different: Claude's structured JSON output mode would replace the current
         free-text parsing, and a validation pipeline would reject and re-request
         extractions below a confidence threshold.
       </p>

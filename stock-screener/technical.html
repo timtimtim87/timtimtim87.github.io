@@ -94,8 +94,15 @@
   └── WebhookApi (API Gateway)
       └── POST /webhook → TelegramBotFunction</pre>
         <p>
-          Deploying changes is <code>sam build &amp;&amp; sam deploy</code> — SAM packages
-          the Lambda code, uploads it to S3, and updates the CloudFormation stack.
+          SAM (Serverless Application Model) is an AWS framework that sits on top of
+          CloudFormation and provides a simplified syntax for defining Lambda functions,
+          API Gateway endpoints, and their associated resources. The two main commands
+          used throughout development were <code>sam build</code>, which compiles the
+          Python functions and resolves dependencies into a deployment package, and
+          <code>sam deploy</code>, which uploads that package to S3 and applies any
+          infrastructure changes via CloudFormation. SAM handles the translation between
+          its simplified template format and the underlying CloudFormation resources,
+          and it tracks stack state so subsequent deploys only update what changed.
         </p>
       </section>
 
@@ -193,8 +200,8 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           Cold starts add 3–4 seconds on the first invocation. For a daily data collection
           job or an on-demand Telegram bot, this is acceptable. A user waiting 5 seconds
           for their /daily command is a minor inconvenience. Optimising cold starts
-          (Lambda layers, smaller packages, provisioned concurrency) is not worth the
-          added complexity at this usage scale.
+          (smaller packages, provisioned concurrency) is not worth the added complexity
+          at this usage scale.
         </p>
         <h3>Timeouts</h3>
         <p>
@@ -314,6 +321,7 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           <li>Formats results into a Telegram message and sends via Telegram Bot API</li>
           <li>Lambda exits</li>
         </ol>
+        <p>Several commands were implemented, though in practice <code>/daily</code> was the one used most — the others were mostly useful during development and testing.</p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Command</th><th>What it does</th></tr></thead>
@@ -321,11 +329,9 @@ Init Duration: 3354.69 ms   ← cold start</pre>
               <tr><td><code>/dashboard</code>, <code>/daily</code></td><td>Reads portfolio + screening CSVs from S3, calls Alpaca account endpoint</td></tr>
               <tr><td><code>/screen</code></td><td>Reads top candidates or full universe CSV from S3</td></tr>
               <tr><td><code>/portfolio</code></td><td>Reads portfolio snapshot CSV from S3</td></tr>
-              <tr><td><code>/monitor</code></td><td>Reads portfolio snapshot, checks position performance against a threshold</td></tr>
               <tr><td><code>/account</code></td><td>Calls Alpaca account endpoint directly — equity, cash, buying power</td></tr>
               <tr><td><code>/trigger</code></td><td>Invokes the data collector Lambda asynchronously — forces an out-of-schedule run</td></tr>
               <tr><td><code>/stats</code></td><td>Reads all three CSVs, reports row counts and latest dates</td></tr>
-              <tr><td><code>/download</code></td><td>Generates presigned S3 URLs for all three CSVs (1-hour expiry)</td></tr>
             </tbody>
           </table>
         </div>

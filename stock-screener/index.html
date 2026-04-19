@@ -49,9 +49,7 @@
     <section style="padding-top:2.5rem;">
       <h2>The Problem</h2>
       <p>
-        I had developed a systematic trading strategy that needed two things: a daily ranked
-        list of entry signals from a ~1,000-stock watchlist, and a custom view of active
-        positions showing strategy-specific metrics not available in any off-the-shelf tool.
+        I had developed a systematic trading strategy that I wanted to test with a paper trading account. I needed a daily ranked list of entry signals from a large stock watchlist, and a custom view of my active positions which was related to the exit strategy.
         No commercial tool offered the right combination. Bloomberg Terminal
         is prohibitively expensive, TradingView doesn't support fully custom metrics, and
         every dollar spent on tooling subtracts directly from trading returns.
@@ -65,13 +63,13 @@
     <section style="padding-top:2rem;">
       <h2>What It Does</h2>
       <p>
-        Every morning before market open, a Lambda function ingests end-of-day price data
-        for ~1,000 stocks, computes custom metrics in Python, and writes three CSV files
-        to S3 — a full universe results file, a top-candidates shortlist, and a portfolio
-        snapshot. When I send <code>/daily</code> from Telegram, a second Lambda reads those
-        files, fetches live position data from my broker API, and sends back a formatted
-        message with ranked candidates and current position metrics. The whole thing runs
-        in under 30 seconds and costs effectively nothing.
+        There are two main flows in this project. The first ingests end-of-day price data
+        each morning, computes the custom attributes required to generate entry signals, and
+        stores the results in S3. The second lets me query those results and view my active
+        positions through a custom lens tied to my exit logic — triggered by sending
+        <code>/daily</code> from Telegram, which fetches live position data from my broker
+        API and returns a formatted summary. The whole thing runs in under 30 seconds and
+        costs effectively nothing.
       </p>
 
       <div class="table-wrap" style="margin-top:1.5rem;">
@@ -92,11 +90,10 @@
       <h2>The Solution — Two Flows</h2>
       <p>
         Two Lambda functions, two trigger mechanisms, one storage layer, one credential store.
-        The collector and the bot share state only through S3 — neither knows the other exists
-        at runtime. This decoupling keeps failure domains separate: a bad collection run
-        doesn't affect the bot's ability to serve the last good data, and a bot failure
-        doesn't disrupt collection. It also makes the outputs inspectable locally by just
-        downloading the CSV files from S3.
+        The two flows share state only through S3 — neither knows the other exists at runtime.
+        A failed collection run doesn't affect the bot's ability to serve the last good data,
+        and a bot failure doesn't disrupt collection. The CSV outputs are also inspectable
+        locally by downloading them directly from S3.
       </p>
 
       <h3 style="margin-top:2rem;">Flow 1 — Daily Data Collection</h3>
@@ -167,12 +164,11 @@
       <ul>
         <li><strong>Query volume increased substantially</strong> — reading full CSVs on every bot request doesn't scale. A metadata index or DynamoDB layer for keyed lookups would be the next step.</li>
         <li><strong>Latency became critical</strong> — cold Lambda starts and S3 reads add up. A warm cache layer would help.</li>
-        <li><strong>Multiple users needed access</strong> — the current design assumes a single user. Multi-user access would require per-user data isolation and an auth layer.</li>
-        <li><strong>The data model grew more complex</strong> — CSV works well for flat tabular data. Parquet + Athena would be a better fit for larger datasets with ad hoc query needs.</li>
+<li><strong>The data model grew more complex</strong> — CSV works well for flat tabular data. Parquet + Athena would be a better fit for larger datasets with ad hoc query needs.</li>
       </ul>
       <p>
-        For the actual use case — one user, one strategy, daily batch — none of these
-        constraints are relevant, and the simplicity of the design is the point.
+        For the actual use case — one strategy, daily batch — none of these constraints are
+        relevant, and the simplicity of the design is the point.
       </p>
     </section>
 
