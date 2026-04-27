@@ -133,7 +133,7 @@
           This introduces a single-AZ egress dependency — accepted for the portfolio phase.
           The Terraform VPC module accepts <code>nat_gateway_mode = "single" | "per_az"</code>
           so switching to per-AZ NAT (and the ~$32/month additional cost) requires one
-          variable change. See <a href="https://github.com/timtimtim87/CHESSCHAT_V2/blob/main/docs/adr/0001-single-nat-gateway.md" target="_blank" rel="noopener">ADR-0001 ↗</a>.
+          variable change.
         </p>
       </section>
 
@@ -144,7 +144,7 @@
         <h2>Security Groups</h2>
         <p>
           Security groups enforce a strict one-directional trust chain. Each layer accepts
-          traffic only from the layer directly above it — no lateral movement is possible.
+          traffic only from the layer directly above it.
         </p>
         <pre>Internet (0.0.0.0/0)
   │  443 / 80
@@ -192,9 +192,12 @@ Redis Security Group</pre>
           </table>
         </div>
         <p>
-          Gateway endpoints are free and route traffic through the AWS backbone without
-          leaving the VPC. Interface endpoints cost ~$7/month each but eliminate NAT data
-          charges that would exceed this on any meaningful ECR pull volume.
+          VPC endpoints can reduce NAT Gateway usage for AWS service traffic such as ECR
+          pulls, CloudWatch Logs, Secrets Manager, S3, and DynamoDB. Gateway endpoints for
+          S3 and DynamoDB are free and often a clear win. Interface endpoints improve private
+          connectivity and may reduce NAT data processing costs, but they have their own
+          hourly and per-GB costs — so whether they save money depends on AZ count, endpoint
+          count, and actual traffic volume.
         </p>
       </section>
 
@@ -558,14 +561,9 @@ ws:{connection_id}        Hash, TTL 60min
       <section id="data-flow">
         <h2>Data Flow</h2>
 
-        <div class="diagram-placeholder">
-          <p class="diagram-placeholder__label">Data Flow Diagram</p>
-          <p>Request path from browser through CloudFront / ALB to Fargate, Redis, DynamoDB — to be added</p>
-        </div>
-
         <h3>Room Creation</h3>
         <ol>
-          <li>User A clicks Create Room → WebSocket message to Fargate</li>
+          <li>User A sends a challenge to User B → WebSocket message to Fargate</li>
           <li>Backend generates 8-char alphanumeric room code</li>
           <li>Room written to Redis with 60-minute TTL</li>
           <li>Room code returned to User A's browser</li>
