@@ -69,28 +69,27 @@
         <p>
           The entire system deploys through AWS SAM (Serverless Application Model), which
           extends CloudFormation with higher-level constructs for serverless resources.
-          A single <code>template.yaml</code> defines both Lambda functions, their IAM roles,
-          EventBridge scheduling, API Gateway configuration, and S3 bucket setup.
+          A single <code>template.yaml</code> defines both Lambda functions, a shared IAM
+          execution role, EventBridge scheduling, API Gateway configuration, and S3 bucket setup.
         </p>
         <pre>template.yaml defines:
   ├── DataCollectorFunction
-  │   ├── Runtime: python3.11
+  │   ├── Runtime: python3.12
   │   ├── Memory: 1024 MB
   │   ├── Timeout: 900s
   │   ├── Events: EventBridgeRule (cron)
-  │   └── Role: DataCollectorRole
+  │   └── Role: LambdaExecutionRole (shared)
   │
   ├── TelegramBotFunction
-  │   ├── Runtime: python3.11
+  │   ├── Runtime: python3.12
   │   ├── Memory: 512 MB
-  │   ├── Timeout: 30s
+  │   ├── Timeout: 60s
   │   ├── Events: ApiGatewayWebhook
-  │   └── Role: TelegramBotRole
+  │   └── Role: LambdaExecutionRole (shared)
   │
   ├── DataBucket (S3)
   │   ├── SSE-S3 encryption
-  │   ├── Versioning: Suspended (lifecycle policy cleans non-current)
-  │   └── LifecyclePolicy: delete non-current versions after 1 day
+  │   └── Versioning: Enabled (no lifecycle policy — see Operational Learnings)
   │
   └── WebhookApi (API Gateway)
       └── POST /webhook → TelegramBotFunction</pre>
@@ -112,38 +111,26 @@
       <section id="iam">
         <h2>IAM Design</h2>
         <p>
-          Each Lambda function has its own IAM execution role with the minimum permissions
-          required. The two roles are kept strictly separate — the bot cannot write data,
-          the collector cannot receive API Gateway events.
+          Both functions share a single <code>LambdaExecutionRole</code>. The role grants:
         </p>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Role</th><th>Permissions</th></tr></thead>
-            <tbody>
-              <tr>
-                <td>DataCollectorRole</td>
-                <td>
-                  <code>s3:PutObject</code> on data bucket<br/>
-                  <code>ssm:GetParameter</code> on Polygon + Alpaca parameter paths<br/>
-                  <code>logs:*</code> on its own log group
-                </td>
-              </tr>
-              <tr>
-                <td>TelegramBotRole</td>
-                <td>
-                  <code>s3:GetObject</code> on data bucket (read-only)<br/>
-                  <code>ssm:GetParameter</code> on Telegram + Alpaca + chat_id parameter paths<br/>
-                  <code>lambda:InvokeFunction</code> on the collector function (for /trigger)<br/>
-                  <code>logs:*</code> on its own log group
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <ul>
+          <li>Full S3 read/write access (<code>GetObject</code>, <code>PutObject</code>, <code>DeleteObject</code>, <code>ListBucket</code>) scoped to the data bucket ARN</li>
+          <li><code>ssm:GetParameter</code> and <code>ssm:GetParameters</code> scoped to the <code>/screener/*</code> parameter path</li>
+          <li><code>lambda:InvokeFunction</code> and <code>lambda:ListFunctions</code> on <code>Resource: "*"</code> — used by the bot's <code>/trigger</code> command</li>
+          <li>CloudWatch Logs write access for both functions</li>
+        </ul>
         <p>
-          Resource ARNs are scoped to specific S3 bucket paths and specific Parameter Store
-          parameter names — not wildcard <code>*</code> resources. If either function were
-          compromised, blast radius is limited to that function's explicit permissions.
+          S3 and SSM access is scoped to specific resource ARNs. The Lambda invoke permissions
+          use a wildcard resource — a known over-provisioning. The correct fix is to pass the
+          collector's ARN as an environment variable at deploy time and scope the
+          <code>InvokeFunction</code> permission to that specific ARN, which would also
+          eliminate the fragile name-scan used by <code>/trigger</code>.
+        </p>
+        <p>
+          In a production system, the functions would have separate roles: the bot would be
+          read-only on S3, and each function's SSM access would be scoped to only the
+          parameters it actually reads. For a personal single-account project, one shared
+          role is a pragmatic simplification — but it's worth naming as such.
         </p>
       </section>
 
@@ -211,7 +198,7 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           Data collector: 900 seconds (the AWS hard ceiling for Lambda). The function
           processes ~900 stocks sequentially with rate-limit pauses built in — a recorded
           production run completed in 81.65 seconds, well within the limit but enough to
-          rule out a shorter timeout. Bot function: 30 seconds, sufficient for S3 reads
+          rule out a shorter timeout. Bot function: 60 seconds, sufficient for S3 reads
           and Alpaca API calls.
         </p>
       </section>
@@ -235,9 +222,13 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         <div class="callout callout--warn">
           <strong>Silent failure discovered post-deployment.</strong> When the Polygon
           subscription lapsed, the Lambda function executed successfully, logged
-          "downloaded data for 0 stocks," and reported success. No alarm fired.
-          The fix: validate that ingested data has today's date before writing to S3.
-          A freshness check on the response timestamp would have caught this immediately.
+          "downloaded data for 0 stocks," and reported success. No alarm fired. The fix
+          is twofold: validate that the ingested dataset is non-empty and date-fresh before
+          writing to S3, failing the Lambda explicitly if <code>stocks_analyzed == 0</code>;
+          and publish <code>stocks_analyzed</code> as a CloudWatch custom metric on each run,
+          with an alarm that fires via SNS if the value drops below a threshold or the
+          function hasn't run within the expected window. That combination would have caught
+          the lapse within one business day.
         </div>
       </section>
 
@@ -266,10 +257,11 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         </p>
         <h3>Versioning Lesson</h3>
         <p>
-          S3 versioning was initially enabled without a lifecycle policy. Each daily overwrite
-          created a new version while retaining all previous versions — the bucket grew
-          exponentially. Versioning was suspended and a lifecycle policy was added to delete
-          non-current versions after 1 day. This should have been configured at bucket creation.
+          S3 versioning is enabled on the bucket. Without a lifecycle policy, each daily
+          overwrite of the candidates file creates a new version while retaining all previous
+          ones — the bucket grows unboundedly. A lifecycle rule expiring non-current versions
+          after 1 day is the fix, and is documented in Operational Learnings. It has not yet
+          been applied to the template.
         </p>
       </section>
 
@@ -278,18 +270,22 @@ Init Duration: 3354.69 ms   ← cold start</pre>
       <section id="parameter-store">
         <h2>Parameter Store</h2>
         <p>
-          Four API credentials are stored as SecureString parameters in AWS Systems Manager
+          Six parameters are stored as SecureString parameters in AWS Systems Manager
           Parameter Store:
         </p>
-        <pre>/stock-screener/polygon/api-key
-/stock-screener/alpaca/api-key
-/stock-screener/alpaca/api-secret
-/stock-screener/telegram/bot-token</pre>
+        <pre>/screener/polygon/api_key
+/screener/alpaca/api_key
+/screener/alpaca/secret_key
+/screener/alpaca/base_url
+/screener/telegram/bot_token
+/screener/telegram/chat_id</pre>
         <p>
-          Parameters are encrypted at rest by KMS. Lambda functions retrieve them at
-          runtime using the AWS SDK — the IAM execution role grants
-          <code>ssm:GetParameter</code> on each specific parameter ARN. No credentials
-          are stored in environment variables, Lambda configuration, or source code.
+          All parameters live under the <code>/screener/</code> path prefix, which matches
+          the IAM policy scope. <code>chat_id</code> is not a credential but an authorised
+          user identifier — the bot reads it at runtime to validate incoming Telegram
+          messages before executing any command. Parameters are encrypted at rest by KMS.
+          No credentials are stored in environment variables, Lambda configuration, or
+          source code.
         </p>
         <p>
           Parameter Store was chosen over Secrets Manager for this use case — standard
@@ -363,6 +359,15 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           against a value stored in Parameter Store. Any request from an unrecognised chat
           is blocked before any data is accessed.
         </p>
+        <div class="callout callout--warn">
+          <strong><code>/trigger</code> uses fragile function discovery.</strong> The command
+          scans all Lambda functions in the account and matches by name substring. Renaming
+          the collector function breaks <code>/trigger</code> silently — no error at deploy
+          time. The correct approach is to pass the collector's ARN as an environment variable
+          at deploy time (<code>!GetAtt DataCollectorFunction.Arn</code> in the SAM template),
+          which would also allow the <code>lambda:InvokeFunction</code> permission to be
+          scoped to that specific ARN instead of <code>*</code>.
+        </div>
       </section>
 
       <hr class="section-divider" />
