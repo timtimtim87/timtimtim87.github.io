@@ -56,6 +56,7 @@
         <a href="#telegram">Telegram Bot</a>
 
         <span class="nav-section">Operations</span>
+        <a href="#observability">Observability</a>
         <a href="#cost">Cost Breakdown</a>
         <a href="#learnings">Operational Learnings</a>
       </nav>
@@ -75,7 +76,7 @@
   ├── DataCollectorFunction
   │   ├── Runtime: python3.11
   │   ├── Memory: 1024 MB
-  │   ├── Timeout: 300s
+  │   ├── Timeout: 900s
   │   ├── Events: EventBridgeRule (cron)
   │   └── Role: DataCollectorRole
   │
@@ -184,10 +185,12 @@
         <h2>Lambda Configuration</h2>
         <h3>Memory Sizing</h3>
         <p>
-          The data collector is configured at 1024 MB — generous for the workload, but
-          Lambda billing is GB-seconds, and given one execution per day the cost impact
-          is negligible (well within free tier). The bot function runs at 512 MB; CloudWatch
-          logs show it uses ~170 MB in practice, suggesting headroom exists.
+          The two functions are sized to their workloads. The data collector runs at 1,024 MB
+          because it fetches ~900 stocks sequentially and builds pandas DataFrames from the
+          API responses entirely in memory. The bot runs at 512 MB — its work is JSON parsing
+          and S3 reads, which CloudWatch logs confirm uses ~170 MB in practice. Lambda billing
+          is GB-seconds, so right-sizing each function independently matters, even if the
+          absolute cost is small at this scale.
         </p>
         <pre># CloudWatch log example (bot function)
 Duration: 2099.62 ms
@@ -205,9 +208,11 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         </p>
         <h3>Timeouts</h3>
         <p>
-          Data collector: 300 seconds. This accommodates fetching 1,000 stock prices from
-          an external API with retry logic for rate limiting. Bot function: 30 seconds,
-          sufficient for S3 reads and Alpaca API calls.
+          Data collector: 900 seconds (the AWS hard ceiling for Lambda). The function
+          processes ~900 stocks sequentially with rate-limit pauses built in — a recorded
+          production run completed in 81.65 seconds, well within the limit but enough to
+          rule out a shorter timeout. Bot function: 30 seconds, sufficient for S3 reads
+          and Alpaca API calls.
         </p>
       </section>
 
@@ -358,6 +363,28 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           against a value stored in Parameter Store. Any request from an unrecognised chat
           is blocked before any data is accessed.
         </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <section id="observability">
+        <h2>Observability</h2>
+        <p>
+          CloudWatch log groups are defined in the SAM template with explicit retention
+          policies: 30 days for the data collector, 14 days for the bot. CloudWatch Logs
+          charges for storage, so unbounded retention accumulates cost quietly. The shorter
+          retention on the bot reflects how long its logs are operationally useful — a bot
+          query log from two weeks ago has no diagnostic value.
+        </p>
+        <div class="callout callout--warn">
+          <strong>No alarms are configured.</strong> This is the root cause of the silent
+          failure described in Operational Learnings — the collector completed with exit
+          code 200 while processing zero stocks, and nothing fired. The fix is a CloudWatch
+          alarm on a custom metric: the Lambda should publish <code>stocks_analyzed</code>
+          on each run, with an alarm that triggers an SNS notification if the value is zero
+          or the function hasn't run within the expected window. A dead-letter queue on the
+          EventBridge rule would capture invocation failures separately.
+        </div>
       </section>
 
       <hr class="section-divider" />
