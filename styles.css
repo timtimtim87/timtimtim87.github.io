@@ -288,6 +288,66 @@ pre code {
   background: #f0f7ff;
 }
 
+/* ── Schema Cards ────────────────────────────────────────── */
+.schema-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  margin: 1.25rem 0;
+  overflow: hidden;
+}
+.schema-card__header {
+  background: var(--text);
+  color: #f7f6f3;
+  padding: 0.55rem 1rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+}
+.schema-card__section {
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.schema-card__section:last-child { border-bottom: none; }
+.schema-card__section-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+  font-weight: 500;
+}
+.schema-card__row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+  line-height: 1.4;
+}
+.schema-card__row:last-child { margin-bottom: 0; }
+.schema-badge {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 500;
+  padding: 0.1em 0.45em;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.schema-badge--pk  { background: var(--accent-dim); color: var(--accent); border: 1px solid #e0b878; }
+.schema-badge--sk  { background: #e8f0f8; color: #3a6ea0; border: 1px solid #b8d0e8; }
+.schema-badge--gsi { background: #f0eeeb; color: var(--text-muted); border: 1px solid var(--border); }
+.schema-card__key      { font-family: var(--mono); font-size: 0.82rem; color: var(--text); }
+.schema-card__key-note { font-size: 0.8rem; color: var(--text-muted); }
+.schema-card__attrs    { font-family: var(--mono); font-size: 0.78rem; color: var(--text); line-height: 1.7; }
+.schema-card__attrs .ref { color: var(--accent); }
+.schema-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1.25rem 0;
+}
+@media (max-width: 580px) { .schema-grid { grid-template-columns: 1fr; } }
+
 /* ── Table ───────────────────────────────────────────────── */
 .table-wrap { overflow-x: auto; margin: 1.25rem 0; }
 table {

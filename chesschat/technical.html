@@ -85,10 +85,9 @@
           not reliance on a single control.
         </p>
 
-        <div class="diagram-placeholder">
-          <p class="diagram-placeholder__label">VPC / Networking Diagram</p>
-          <p>Three-tier subnet layout, AZ distribution, route tables, endpoints — to be added</p>
-        </div>
+        <figure style="margin:1.5rem 0;">
+          <img src="../chesschat-infra-light.png" alt="ChessChat infrastructure diagram showing three-tier VPC, ECS Fargate, ALB, Redis, DynamoDB, CloudFront and Cognito" style="width:100%; border-radius:8px;" />
+        </figure>
 
         <div class="table-wrap">
           <table>
@@ -293,10 +292,6 @@ terraform {
           GitHub's OIDC provider is trusted by an IAM role, and the workflow assumes that role
           for the duration of the pipeline run.
         </p>
-        <div class="diagram-placeholder">
-          <p class="diagram-placeholder__label">CI/CD Flow Diagram</p>
-          <p>GitHub Actions → OIDC → AWS → ECR push → ECS deploy — to be added</p>
-        </div>
         <p>Pipeline stages on push to <code>main</code>:</p>
         <ol>
           <li>Run frontend tests (<code>vitest</code>)</li>
@@ -355,21 +350,33 @@ terraform {
           initial design; retrofitting single-table key namespacing would have been disruptive.
         </p>
 
-        <div class="diagram-placeholder">
-          <p class="diagram-placeholder__label">Entity Relationship Diagram</p>
-          <p>DynamoDB table relationships and GSI structure — to be added</p>
+        <h3>Users</h3>
+        <div class="schema-card">
+          <div class="schema-card__header">users</div>
+          <div class="schema-card__section">
+            <div class="schema-card__section-label">Keys</div>
+            <div class="schema-card__row">
+              <span class="schema-badge schema-badge--pk">PK</span>
+              <span class="schema-card__key">user_id (S)</span>
+              <span class="schema-card__key-note">Cognito sub — immutable UUID</span>
+            </div>
+          </div>
+          <div class="schema-card__section">
+            <div class="schema-card__section-label">Global Secondary Index</div>
+            <div class="schema-card__row">
+              <span class="schema-badge schema-badge--gsi">GSI</span>
+              <span class="schema-card__key">username-index</span>
+              <span class="schema-card__key-note">PK: username (S)</span>
+            </div>
+          </div>
+          <div class="schema-card__section">
+            <div class="schema-card__section-label">Attributes</div>
+            <div class="schema-card__attrs">
+              username · display_name · email · chess_com_username · chess_com_verified<br>
+              total_games · wins · losses · draws · created_at · last_login_at
+            </div>
+          </div>
         </div>
-
-        <h3>Users Table</h3>
-        <pre>PK: user_id (S)   ← Cognito sub (immutable UUID)
-
-Attributes: username, display_name, email,
-            chess_com_username, chess_com_verified,
-            total_games, wins, losses, draws,
-            created_at, last_login_at
-
-GSI: username-index
-  PK: username (S)</pre>
         <div class="callout">
           <strong>Why <code>user_id</code> as PK, not <code>username</code>?</strong>
           Usernames can change. The chess.com OAuth integration includes a displacement mechanic
@@ -378,17 +385,44 @@ GSI: username-index
           <code>UpdateItem</code>, not a data migration.
         </div>
 
-        <h3>Games Table</h3>
-        <pre>PK: game_id (S)   ← UUID
-SK: ended_at (N)  ← Unix timestamp (ms)
-
-Attributes: white_player_id, black_player_id,
-            winner, result, total_moves, duration_seconds,
-            moves[], fen_history[], pgn, room_code,
-            time_white_remaining, time_black_remaining
-
-GSI-1: white-player-index   PK: white_player_id, SK: ended_at
-GSI-2: black-player-index   PK: black_player_id, SK: ended_at</pre>
+        <h3>Games</h3>
+        <div class="schema-card">
+          <div class="schema-card__header">games</div>
+          <div class="schema-card__section">
+            <div class="schema-card__section-label">Keys</div>
+            <div class="schema-card__row">
+              <span class="schema-badge schema-badge--pk">PK</span>
+              <span class="schema-card__key">game_id (S)</span>
+              <span class="schema-card__key-note">UUID</span>
+            </div>
+            <div class="schema-card__row">
+              <span class="schema-badge schema-badge--sk">SK</span>
+              <span class="schema-card__key">ended_at (N)</span>
+              <span class="schema-card__key-note">Unix timestamp (ms)</span>
+            </div>
+          </div>
+          <div class="schema-card__section">
+            <div class="schema-card__section-label">Global Secondary Indexes</div>
+            <div class="schema-card__row">
+              <span class="schema-badge schema-badge--gsi">GSI 1</span>
+              <span class="schema-card__key">white-player-index</span>
+              <span class="schema-card__key-note">PK: white_player_id · SK: ended_at</span>
+            </div>
+            <div class="schema-card__row">
+              <span class="schema-badge schema-badge--gsi">GSI 2</span>
+              <span class="schema-card__key">black-player-index</span>
+              <span class="schema-card__key-note">PK: black_player_id · SK: ended_at</span>
+            </div>
+          </div>
+          <div class="schema-card__section">
+            <div class="schema-card__section-label">Attributes</div>
+            <div class="schema-card__attrs">
+              <span class="ref">white_player_id → users</span> · <span class="ref">black_player_id → users</span><br>
+              winner · result · total_moves · duration_seconds · room_code<br>
+              time_white_remaining · time_black_remaining · moves[] · fen_history[] · pgn
+            </div>
+          </div>
+        </div>
         <div class="callout">
           <strong>Why two GSIs?</strong> A player alternates colours across games.
           To query their full history you need games where they were white AND games where
@@ -399,16 +433,88 @@ GSI-2: black-player-index   PK: black_player_id, SK: ended_at</pre>
 
         <h3>Social Tables</h3>
         <p>Four additional tables support the social layer:</p>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Table</th><th>PK</th><th>SK</th><th>GSIs</th></tr></thead>
-            <tbody>
-              <tr><td>Friendships</td><td><code>user_id</code></td><td><code>friend_user_id</code></td><td>None — mirrored writes</td></tr>
-              <tr><td>Friend Requests</td><td><code>recipient_user_id</code></td><td><code>request_id</code></td><td>sender-requests-index</td></tr>
-              <tr><td>Challenges</td><td><code>challenge_id</code></td><td>—</td><td>challenger-index, challenged-index</td></tr>
-              <tr><td>Notifications</td><td><code>user_id</code></td><td><code>notification_id</code></td><td>None</td></tr>
-            </tbody>
-          </table>
+        <div class="schema-grid">
+          <div class="schema-card" style="margin:0;">
+            <div class="schema-card__header">friendships</div>
+            <div class="schema-card__section">
+              <div class="schema-card__section-label">Keys</div>
+              <div class="schema-card__row">
+                <span class="schema-badge schema-badge--pk">PK</span>
+                <span class="schema-card__key">user_id (S)</span>
+              </div>
+              <div class="schema-card__row">
+                <span class="schema-badge schema-badge--sk">SK</span>
+                <span class="schema-card__key">friend_user_id (S)</span>
+              </div>
+            </div>
+            <div class="schema-card__section">
+              <div class="schema-card__section-label">GSIs</div>
+              <div class="schema-card__attrs">None — mirrored writes</div>
+            </div>
+          </div>
+
+          <div class="schema-card" style="margin:0;">
+            <div class="schema-card__header">friend_requests</div>
+            <div class="schema-card__section">
+              <div class="schema-card__section-label">Keys</div>
+              <div class="schema-card__row">
+                <span class="schema-badge schema-badge--pk">PK</span>
+                <span class="schema-card__key">recipient_user_id (S)</span>
+              </div>
+              <div class="schema-card__row">
+                <span class="schema-badge schema-badge--sk">SK</span>
+                <span class="schema-card__key">request_id (S)</span>
+              </div>
+            </div>
+            <div class="schema-card__section">
+              <div class="schema-card__section-label">GSIs</div>
+              <div class="schema-card__row">
+                <span class="schema-badge schema-badge--gsi">GSI</span>
+                <span class="schema-card__key" style="font-size:0.76rem;">sender-requests-index</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="schema-card" style="margin:0;">
+            <div class="schema-card__header">challenges</div>
+            <div class="schema-card__section">
+              <div class="schema-card__section-label">Keys</div>
+              <div class="schema-card__row">
+                <span class="schema-badge schema-badge--pk">PK</span>
+                <span class="schema-card__key">challenge_id (S)</span>
+              </div>
+            </div>
+            <div class="schema-card__section">
+              <div class="schema-card__section-label">GSIs</div>
+              <div class="schema-card__row">
+                <span class="schema-badge schema-badge--gsi">GSI</span>
+                <span class="schema-card__key" style="font-size:0.76rem;">challenger-index</span>
+              </div>
+              <div class="schema-card__row">
+                <span class="schema-badge schema-badge--gsi">GSI</span>
+                <span class="schema-card__key" style="font-size:0.76rem;">challenged-index</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="schema-card" style="margin:0;">
+            <div class="schema-card__header">notifications</div>
+            <div class="schema-card__section">
+              <div class="schema-card__section-label">Keys</div>
+              <div class="schema-card__row">
+                <span class="schema-badge schema-badge--pk">PK</span>
+                <span class="schema-card__key">user_id (S)</span>
+              </div>
+              <div class="schema-card__row">
+                <span class="schema-badge schema-badge--sk">SK</span>
+                <span class="schema-card__key">notification_id (S)</span>
+              </div>
+            </div>
+            <div class="schema-card__section">
+              <div class="schema-card__section-label">GSIs</div>
+              <div class="schema-card__attrs">None</div>
+            </div>
+          </div>
         </div>
         <p>
           Friendships are written in both directions simultaneously (A→B and B→A), so listing
@@ -496,7 +602,7 @@ ws:{connection_id}        Hash, TTL 60min
       <section id="session-lifecycle">
         <h2>Session Lifecycle</h2>
         <p>
-          Rooms follow phone-call semantics. The lifecycle is deterministic with no
+          Rooms follow video-call semantics. The lifecycle is deterministic with no
           ambiguous intermediate states.
         </p>
         <pre>Room created (User A)
