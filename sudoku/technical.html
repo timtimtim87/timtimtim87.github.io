@@ -77,20 +77,23 @@
         </p>
         <img src="SUDOKOO.jpg" alt="Sudoku architecture flow diagram" style="width:100%; border-radius:8px; margin:1rem 0;" />
         <p>
+          The CloudFront distribution is configured with <code>PriceClass_100</code>, which
+          restricts edge locations to the US, Canada, and Europe. This reduces cost by
+          excluding more expensive regions while covering the expected user base.
+          S3 versioning is enabled on the bucket — files are encrypted at rest with SSE-AES256.
+        </p>
+        <p>
           CloudFront provides two key benefits beyond CDN caching:
         </p>
         <ol>
           <li>
-            <strong>HTTPS enforcement.</strong> CloudFront issues a free ACM certificate
-            and automatically redirects HTTP to HTTPS. This is required for browser camera
-            access (the Sudoku scan feature uses the device camera, which browsers restrict
-            to secure contexts only).
+            <strong>HTTPS enforcement.</strong> CloudFront redirects HTTP to HTTPS. This is
+            required for browser camera access — browsers restrict the camera API to secure
+            contexts only.
           </li>
           <li>
-            <strong>Cost control.</strong> S3 charges for data transfer out. If users could
-            access the bucket directly, every file request would incur S3 egress charges.
-            CloudFront caches at edge locations — subsequent requests are served from cache,
-            not from S3, dramatically reducing transfer costs at any meaningful traffic volume.
+            <strong>Cost control.</strong> S3 charges for data transfer out. CloudFront caches
+            at edge locations so subsequent requests are served from cache, not from S3.
           </li>
         </ol>
       </section>
@@ -160,7 +163,7 @@ Access-Control-Allow-Headers: Content-Type</pre>
           <table>
             <thead><tr><th>Setting</th><th>Value</th><th>Reason</th></tr></thead>
             <tbody>
-              <tr><td>Runtime</td><td>Python 3.11</td><td>Boto3 SDK, image processing libraries</td></tr>
+              <tr><td>Runtime</td><td>Node.js 18.x</td><td>AWS SDK v3 (<code>@aws-sdk/client-bedrock-runtime</code>)</td></tr>
               <tr><td>Memory</td><td>512 MB</td><td>Handles base64 image encoding in memory</td></tr>
               <tr><td>Timeout</td><td>30 seconds</td><td>Accommodates Bedrock model inference latency</td></tr>
               <tr><td>Architecture</td><td>x86_64</td><td>Default — arm64 would be cheaper but negligible at this scale</td></tr>
@@ -175,8 +178,8 @@ Access-Control-Allow-Headers: Content-Type</pre>
         </p>
         <p>
           Memory at 512 MB handles base64 encoding of a typical phone camera image
-          (3–8 MB JPEG → ~4–11 MB base64) in memory alongside the Python runtime.
-          CloudWatch logs confirm actual usage is well below 512 MB.
+          (3–8 MB JPEG → ~4–11 MB base64) in memory. CloudWatch logs confirm actual
+          usage is well below 512 MB.
         </p>
       </section>
 
@@ -186,8 +189,8 @@ Access-Control-Allow-Headers: Content-Type</pre>
         <h2>API Gateway</h2>
         <p>
           A single API Gateway resource handles the puzzle scan endpoint:
-          <code>POST /scan</code>. The request body contains a base64-encoded image and
-          is passed directly to the Lambda function as the event payload.
+          <code>POST /scan-sudoku</code>. The request body contains a base64-encoded image
+          and is passed directly to the Lambda function as the event payload.
         </p>
         <p>
           API Gateway handles SSL termination, request routing, and throttling. As noted
@@ -237,34 +240,47 @@ Access-Control-Allow-Headers: Content-Type</pre>
         <h2>Bedrock Integration</h2>
         <p>
           Amazon Bedrock provides managed access to foundation models without infrastructure
-          management. The Lambda function calls the Bedrock runtime API with the image and
-          a structured extraction prompt.
+          management. The Lambda function (Node.js, AWS SDK v3) calls the Bedrock runtime
+          API with the image and a structured extraction prompt.
         </p>
-        <pre># Lambda invocation (simplified)
-response = bedrock_client.invoke_model(
-    modelId='anthropic.claude-3-5-sonnet-20241022-v2:0',
-    body=json.dumps({
-        'anthropic_version': 'bedrock-2023-05-31',
-        'max_tokens': 1000,
-        'messages': [{
-            'role': 'user',
-            'content': [
-                {
-                    'type': 'image',
-                    'source': {
-                        'type': 'base64',
-                        'media_type': 'image/jpeg',
-                        'data': base64_image
-                    }
-                },
-                {
-                    'type': 'text',
-                    'text': 'Extract the 9x9 Sudoku grid...'
-                }
-            ]
-        }]
-    })
-)</pre>
+        <pre>// Lambda handler (simplified)
+const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
+
+const client = new BedrockRuntimeClient({ region: 'us-east-1' });
+
+const response = await client.send(new InvokeModelCommand({
+  modelId: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+  contentType: 'application/json',
+  accept: 'application/json',
+  body: JSON.stringify({
+    anthropic_version: 'bedrock-2023-05-31',
+    max_tokens: 2000,
+    messages: [{
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: 'Extract the 9x9 Sudoku grid...'
+        },
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: 'image/jpeg',
+            data: base64Image
+          }
+        }
+      ]
+    }]
+  })
+}));</pre>
+        <p>
+          Claude is asked to return JSON only — no prose. The Lambda strips markdown fences
+          as a fallback if Claude wraps the response. After extraction and puzzle validation,
+          the Lambda runs its own backtracking solver and returns both the puzzle and solution
+          to the frontend. Claude handles extraction; Lambda handles solving; the browser
+          handles gameplay and validates each move against the stored solution in real time.
+        </p>
         <h3>Why Claude 3.5 Sonnet specifically?</h3>
         <p>
           Claude 3.5 Sonnet offers the best combination of vision capability and cost
@@ -347,37 +363,24 @@ response = bedrock_client.invoke_model(
       <section id="iam">
         <h2>IAM Design</h2>
         <p>
-          The Lambda execution role follows least-privilege with three explicit permissions:
+          The Lambda execution role has two permissions:
         </p>
-        <pre># IAM inline policy
-{
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": "bedrock:InvokeModel",
-      "Resource": "arn:aws:bedrock:us-east-1::foundation-model/
-                   anthropic.claude-3-5-sonnet-20241022-v2:0"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents"
-      ],
-      "Resource": "arn:aws:logs:us-east-1:ACCOUNT:log-group:
-                   /aws/lambda/sudokoo-scan:*"
-    }
-  ]
-}</pre>
+        <ul>
+          <li>
+            <strong>AWSLambdaBasicExecutionRole</strong> — AWS managed policy, attached directly.
+            Grants CloudWatch Logs write access across all log groups. Broader than strictly
+            necessary, but standard practice for Lambda functions and the simplest correct option.
+          </li>
+          <li>
+            <strong>Custom inline policy</strong> — <code>bedrock:InvokeModel</code> scoped to
+            the specific model ARN: <code>anthropic.claude-3-5-sonnet-20241022-v2:0</code>.
+            The function cannot invoke any other Bedrock model.
+          </li>
+        </ul>
         <p>
-          The Bedrock permission is scoped to the specific model ARN — not all Bedrock models.
-          If a different model is needed in future, it requires an explicit IAM update, not an
-          accidental discovery that the role had broader access than intended.
-        </p>
-        <p>
-          The CloudWatch Logs permission is scoped to this function's specific log group ARN.
-          The function cannot write to any other log group.
+          The Bedrock scope is tight by design. Switching to a different model requires an
+          explicit IAM update — there is no ambient permission to call whatever model is
+          cheapest or newest at the time.
         </p>
       </section>
 
@@ -458,23 +461,21 @@ response = bedrock_client.invoke_model(
       <section id="deployment">
         <h2>Deployment Process</h2>
         <p>
-          This project was deliberately deployed through the AWS console rather than IaC.
-          The goal was developing hands-on understanding of each service's configuration
-          options — something that IaC abstracts away.
+          Infrastructure was initially set up through the AWS console. The goal was
+          building hands-on understanding of each service's configuration options before
+          capturing them in code. A CloudFormation template (<code>sudokoo-infrastructure.yaml</code>)
+          was written to define the full stack, and a <code>deploy.sh</code> script was
+          written to automate deployments — it updates the CloudFormation stack, injects
+          the API Gateway URL into <code>app.js</code>, uploads frontend files to S3, and
+          runs a CloudFront invalidation.
         </p>
         <p>
-          The tradeoff became clear quickly: manual deployment is fine for one-time setup
-          but painful for iteration. Every frontend change required:
-        </p>
-        <ol>
-          <li>Upload new files to S3 via console or CLI</li>
-          <li>Manually create a CloudFront invalidation (<code>/*</code>)</li>
-          <li>Wait 60–90 seconds for invalidation to propagate</li>
-        </ol>
-        <p>
-          A GitHub Actions workflow handling this automatically would be the first change
-          made if development continued. The console-first approach achieved its learning
-          goal; any future project starts with IaC from day one.
+          In practice, most day-to-day iteration still happened through the console. The
+          painful part was CloudFront cache invalidation — every frontend change required
+          triggering a <code>/*</code> invalidation and waiting 60–90 seconds for it to
+          propagate. Doing that manually on every iteration became tedious quickly. The
+          deploy script addressed this, but a proper CI/CD pipeline (push to main → S3
+          sync → invalidation) would eliminate the manual step entirely.
         </p>
         <div style="padding-bottom: 3rem;"></div>
       </section>

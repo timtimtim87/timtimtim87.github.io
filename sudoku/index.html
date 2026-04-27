@@ -76,21 +76,30 @@ CloudFront (CDN + HTTPS enforcement)
   ▼
 S3 (private bucket — HTML, CSS, JS)
 
-User uploads puzzle photo
-  │  HTTPS POST (base64 image)
+Camera scan flow:
+  Browser → base64 image → POST /scan-sudoku
+  │
   ▼
 API Gateway
   │
   ▼
-Lambda (Python)
-  │  Invoke model: claude-3-5-sonnet
+Lambda (Node.js 18.x)
+  │  InvokeModelCommand — claude-3-5-sonnet
   ▼
 Amazon Bedrock
   │  Returns: extracted 9x9 grid (JSON)
   ▼
-Lambda (validates puzzle, returns to browser)
+Lambda (validates puzzle + runs backtracking solver)
+  │  Returns: { puzzle, solution }
   ▼
 Browser (renders interactive Sudoku game)</pre>
+      <p>
+        The camera scan is one input mode. The app also includes a client-side puzzle
+        generator — new games are generated in the browser with no API call required.
+        The game engine (pencil marks, keyboard navigation, move validation, a timer,
+        and conflict highlighting) runs entirely client-side and works independently
+        of the AWS backend.
+      </p>
     </section>
 
     <section style="padding-top:2rem;">
