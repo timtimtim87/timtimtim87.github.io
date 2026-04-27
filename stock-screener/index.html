@@ -28,8 +28,7 @@
       <h1 class="page-header__title">AWS Stock Screener</h1>
       <p class="page-header__subtitle">
         Serverless stock screening and portfolio tracker with Telegram bot interface.
-        Built to solve a real trading problem — cost ~$0/month, does exactly what is needed,
-        nothing more.
+        Cost ~$0/month.
       </p>
       <div class="tags" style="margin-top:1.25rem;">
         <span class="tag">Lambda</span>
@@ -56,7 +55,7 @@
       </p>
       <p>
         The solution needed to be cheap to run, accessible from my phone, and flexible enough
-        to evolve with the strategy. Building it on AWS was the right call.
+        to evolve with the strategy.
       </p>
     </section>
 
@@ -114,8 +113,7 @@
           <strong>Lambda over EC2 or ECS.</strong> The workload runs once daily plus sporadic
           bot queries — compute sits idle 23+ hours per day. EC2 would cost $30–50/month for
           an always-on instance. Lambda costs ~$1–2/month (mostly free tier) and scales
-          automatically. The workload is infrequent, bursty, and event-driven — serverless
-          is a strong fit on both cost and operational overhead.
+          automatically.
         </p>
       </div>
 
@@ -127,7 +125,7 @@
           designing partition keys before knowing future analysis needs, and makes local data
           exploration harder. S3 costs ~$0.30/month, works natively with Python/pandas, and
           allows downloading files for local analysis whenever needed. The data access pattern
-          is append-only writes and occasional full reads — S3 is the right tool.
+          is append-only writes and occasional full reads.
         </p>
       </div>
 
@@ -174,10 +172,6 @@
 
     <section style="padding-top:2rem;">
       <h2>What I'd Do Differently</h2>
-      <p>
-        Honest reflection is part of how this project demonstrates architectural thinking —
-        not just what was built, but what the tradeoffs were.
-      </p>
       <ul>
         <li>
           <strong>Data validation.</strong> When the Polygon subscription lapsed, the Lambda

@@ -139,9 +139,8 @@ Static landing / auth       Authenticated gameplay runtime
       <h3>Split-Host Architecture</h3>
       <p>
         The static marketing and auth surface runs on CloudFront + S3, while the gameplay
-        runtime runs on ECS Fargate behind an ALB. Keeping them separate produces a cleaner
-        security boundary, independent deployment pipelines, and means the ALB never sees
-        unauthenticated traffic.
+        runtime runs on ECS Fargate behind an ALB. Keeping them separate means independent
+        deployment pipelines and the ALB only handles authenticated gameplay traffic.
       </p>
 
       <h3>Single NAT Gateway</h3>
@@ -172,7 +171,7 @@ Static landing / auth       Authenticated gameplay runtime
         Chime SDK provided a fast path to working video. The planned migration to native
         browser WebRTC with a self-hosted Coturn server eliminates per-minute billing in favour
         of flat EC2 cost. All sessions are 1-on-1 so an SFU is never needed; only ~15% require
-        TURN relay, keeping Coturn costs predictable at any scale.
+        TURN relay.
       </p>
     </section>
 
@@ -183,9 +182,7 @@ Static landing / auth       Authenticated gameplay runtime
         VPC and networking had to exist before any compute could be placed inside it. ECS and
         the container environment came next, since the application itself runs there. The chess
         engine and game logic were built on top of that working compute layer, and the video
-        integration followed once the core session model was stable. Building in this sequence
-        meant each decision was grounded in a working foundation rather than assumptions about
-        what would come before it.
+        integration followed once the core session model was stable.
       </p>
 
       <div class="decision">
