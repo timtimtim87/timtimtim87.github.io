@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AWS Stock Screener — Tim Hewitt</title>
+  <meta name="description" content="Serverless stock screener and portfolio tracker on AWS. Architecture overview." />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+
+  <nav class="site-nav">
+    <div class="site-nav__inner">
+      <a href="/" class="site-nav__logo">tim hewitt</a>
+      <ul class="site-nav__links">
+        <li><a href="/#projects">Projects</a></li>
+        <li><a href="/#about">About</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn ↗</a></li>
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="container">
+
+    <header class="page-header">
+      <p class="page-header__eyebrow">Serverless · Data Pipeline · Personal Tool</p>
+      <h1 class="page-header__title">AWS Stock Screener</h1>
+      <p class="page-header__subtitle">
+        Serverless stock screener and portfolio tracker with Telegram bot interface.
+        Built to solve a real trading problem — cost ~$0/month, does exactly what is needed,
+        nothing more.
+      </p>
+      <div class="tags" style="margin-top:1.25rem;">
+        <span class="tag">Lambda</span>
+        <span class="tag">EventBridge</span>
+        <span class="tag">API Gateway</span>
+        <span class="tag">S3</span>
+        <span class="tag">Parameter Store</span>
+        <span class="tag">AWS SAM</span>
+        <span class="tag">Python</span>
+      </div>
+      <div style="margin-top:1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+        <span class="status status--live">Live</span>
+        <a href="technical.html" class="btn btn--outline" style="font-size:0.82rem;">Technical deep-dive →</a>
+        <a href="https://github.com/timtimtim87/STOCK-SCREENER" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+    </header>
+
+    <!-- Architecture diagram -->
+    <div class="diagram-placeholder" style="margin-top:2.5rem;">
+      <p class="diagram-placeholder__label">Architecture Diagram</p>
+      <p>EventBridge → Lambda → S3, API Gateway → Lambda → Telegram — to be added</p>
+    </div>
+
+    <section style="padding-top:2.5rem;">
+      <h2>The Problem</h2>
+      <p>
+        I had developed a systematic trading strategy that needed two things: a daily ranked
+        list of entry signals from a ~1,000-stock watchlist, and a custom view of active
+        positions showing strategy-specific exit metrics — drawdown from peak, recovery rate,
+        and signal aging. No commercial tool offered the right combination. Bloomberg Terminal
+        is prohibitively expensive, TradingView doesn't support fully custom metrics, and
+        every dollar spent on tooling subtracts directly from trading returns.
+      </p>
+      <p>
+        The solution needed to be cheap to run, accessible from my phone, and flexible enough
+        to evolve with the strategy. Building it on AWS was the right call.
+      </p>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>What It Does</h2>
+      <p>
+        Every morning before market open, a Lambda function ingests end-of-day price data
+        for ~1,000 stocks, computes ranking metrics in Python, and writes three CSV files
+        to S3 — a full universe results file, a top-candidates shortlist, and a portfolio
+        snapshot. When I send <code>/daily</code> from Telegram, a second Lambda reads those
+        files, fetches live position data from my broker API, and sends back a formatted
+        message with ranked candidates and current position metrics. The whole thing runs
+        in under 30 seconds and costs effectively nothing.
+      </p>
+
+      <div class="table-wrap" style="margin-top:1.5rem;">
+        <table>
+          <thead><tr><th>Outcome</th></tr></thead>
+          <tbody>
+            <tr><td>~1,000 stocks screened and ranked daily before market open</td></tr>
+            <tr><td>Ranked entry candidates delivered to Telegram on demand</td></tr>
+            <tr><td>Custom exit metrics unavailable in off-the-shelf tools</td></tr>
+            <tr><td>Replaced a slow, inconsistent manual workflow</td></tr>
+            <tr><td>Runs at ~$0–2/month (mostly within free tier)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>Architecture Overview</h2>
+      <p>
+        Two Lambda functions, two trigger mechanisms, one storage layer, one credential store.
+        The collector and the bot share state only through S3 — neither knows the other exists
+        at runtime. This decoupling keeps failure domains separate: a bad collection run
+        doesn't affect the bot's ability to serve the last good data, and a bot failure
+        doesn't disrupt collection. It also makes the outputs inspectable locally by just
+        downloading the CSV files from S3.
+      </p>
+      <pre>EventBridge (cron: 11 AM daily)
+  │
+  ▼
+Data Collector Lambda
+  │  Fetch EOD prices (Polygon API)
+  │  Calculate custom drawdown metrics
+  │  Write results to S3 (3 CSV files)
+  ▼
+S3 (storage layer)
+  ├── russell_1000_drawdown_results.csv
+  ├── daily_top_candidates.csv
+  └── portfolio_snapshots.csv
+
+Telegram (user sends /daily command)
+  │
+  ▼
+API Gateway webhook
+  │
+  ▼
+Telegram Bot Lambda
+  │  Read CSVs from S3
+  │  Fetch live positions (Alpaca API)
+  │  Format and send response
+  ▼
+Telegram message (phone)</pre>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>Key Design Decisions</h2>
+
+      <div class="decision">
+        <p class="decision__label">Decision · Compute</p>
+        <p>
+          <strong>Lambda over EC2 or ECS.</strong> The workload runs once daily plus sporadic
+          bot queries — compute sits idle 23+ hours per day. EC2 would cost $30–50/month for
+          an always-on instance. Lambda costs ~$1–2/month (mostly free tier) and scales
+          automatically. The workload is infrequent, bursty, and event-driven — serverless
+          is a strong fit on both cost and operational overhead.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Decision · Storage</p>
+        <p>
+          <strong>S3-based file storage over RDS or DynamoDB.</strong> RDS costs $20+/month
+          minimum for an idle instance and adds VPC networking overhead. DynamoDB would require
+          designing partition keys before knowing future analysis needs, and makes local data
+          exploration harder. S3 costs ~$0.30/month, works natively with Python/pandas, and
+          allows downloading files for local analysis whenever needed. The data access pattern
+          is append-only writes and occasional full reads — S3 is the right tool.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Decision · Credentials</p>
+        <p>
+          <strong>Parameter Store over environment variables or Secrets Manager.</strong>
+          Parameter Store integrates natively with Lambda via IAM, includes KMS encryption,
+          and costs nothing for standard parameters. API keys are fetched at runtime —
+          never hardcoded, never committed to git, never in plaintext environment variables.
+          Secrets Manager would be the right choice if rotation were needed; for static API
+          keys, Parameter Store is the simpler and cheaper option.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Decision · No VPC</p>
+        <p>
+          <strong>Lambda in public mode, no VPC configuration.</strong> Lambda accesses S3
+          and Parameter Store through AWS internal service endpoints without a VPC. Adding
+          a VPC would require a NAT Gateway (~$45/month) or VPC endpoints (~$7/service/month)
+          for internet access. For this workload, VPC deployment adds cost and networking
+          complexity without materially improving the security posture.
+        </p>
+      </div>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>Where This Design Breaks Down</h2>
+      <p>
+        This architecture is well-suited to scheduled batch ingestion, low-frequency query
+        traffic, and file-oriented analytics. It would stop being the right fit if:
+      </p>
+      <ul>
+        <li><strong>Query volume increased substantially</strong> — reading full CSVs on every bot request doesn't scale. A metadata index or DynamoDB layer for keyed lookups would be the next step.</li>
+        <li><strong>Latency became critical</strong> — cold Lambda starts and S3 reads add up. A warm cache layer would help.</li>
+        <li><strong>Multiple users needed access</strong> — the current design assumes a single user. Multi-user access would require per-user data isolation and an auth layer.</li>
+        <li><strong>The data model grew more complex</strong> — CSV works well for flat tabular data. Parquet + Athena would be a better fit for larger datasets with ad hoc query needs.</li>
+      </ul>
+      <p>
+        For the actual use case — one user, one strategy, daily batch — none of these
+        constraints are relevant, and the simplicity of the design is the point.
+      </p>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>What I'd Do Differently</h2>
+      <p>
+        Honest reflection is part of how this project demonstrates architectural thinking —
+        not just what was built, but what the tradeoffs were.
+      </p>
+      <ul>
+        <li>
+          <strong>Data validation.</strong> When the Polygon subscription lapsed, the Lambda
+          didn't fail — it logged "downloaded data for 0 stocks" and reported success. Silent
+          failures are worse than loud ones. A simple date-freshness check on the ingested
+          data would have caught this immediately.
+        </li>
+        <li>
+          <strong>Resource tagging from day one.</strong> Running multiple projects in one
+          account without tagging makes cost attribution impossible. Each project should have
+          been in its own account, or at minimum every resource tagged with a project identifier.
+        </li>
+        <li>
+          <strong>S3 versioning strategy.</strong> Versioning was enabled without a lifecycle
+          policy, causing exponential bucket growth as each daily CSV created a new version.
+          A lifecycle policy to expire non-current versions after 1 day should have been
+          configured at creation.
+        </li>
+        <li>
+          <strong>Single data provider.</strong> Using both Polygon and Alpaca added
+          unnecessary complexity. Alpaca supports EOD price data — consolidating to one
+          provider would simplify the architecture and reduce credential surface area.
+        </li>
+      </ul>
+    </section>
+
+    <section style="padding: 2.5rem 0 4rem;">
+      <hr class="section-divider" />
+      <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+        <a href="technical.html" class="btn btn--primary">Technical deep-dive →</a>
+        <a href="https://github.com/timtimtim87/STOCK-SCREENER" class="btn btn--outline" target="_blank" rel="noopener">View on GitHub ↗</a>
+        <a href="/" class="btn btn--outline">← All projects</a>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <p>© 2025 Tim Hewitt</p>
+      <ul class="site-footer__links">
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn</a></li>
+        <li><a href="mailto:tim.antibes@gmail.com">Email</a></li>
+      </ul>
+    </div>
+  </footer>
+
+</body>
+</html>

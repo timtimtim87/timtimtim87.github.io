@@ -55,7 +55,7 @@
       <p>
         The gameplay model follows <strong>video-call session semantics</strong>: both players
         enter a video room that persists for the session, playing as many sequential chess games
-        as they want (currently with a max time of 1 hour per video chat room). Video chat
+        as they want within the 1-hour room window — each game uses a 5-minute per-player chess clock. Video chat
         never interrupts between games. When both players leave, the room tears down
         immediately — no stale active rooms accumulating AWS Chime costs.
       </p>
@@ -197,7 +197,7 @@ Static landing / auth       Authenticated gameplay runtime
 
       <div class="decision">
         <p class="decision__label">3 · Auth</p>
-        <p>Cognito user pool with email/password and Google OAuth. Hosted UI for the login surface on the static site. JWT tokens used for both REST and WebSocket authentication.</p>
+        <p>Cognito user pool with email/password and Google OAuth. The auth surface (chess-chat.com) is a custom single-page app written in vanilla JS — no framework, no build step — handling login, signup, email verification, forgot password, OAuth callback, and session handoff. JWT tokens used for both REST and WebSocket authentication.</p>
       </div>
 
       <div class="decision">
@@ -207,12 +207,12 @@ Static landing / auth       Authenticated gameplay runtime
 
       <div class="decision">
         <p class="decision__label">5 · CI/CD</p>
-        <p>GitHub Actions pipeline with OIDC authentication to AWS — no stored access keys. Separate pipelines for the static site and the ECS service. ECR image tagged by commit SHA, ECS rolling deploy on push to main.</p>
+        <p>GitHub Actions pipeline with OIDC authentication to AWS — no stored access keys. A single deploy pipeline on push to main: ECR image tagged by commit SHA, ECS rolling deploy, then static auth assets synced to S3 with CloudFront invalidation. Tests (backend, frontend, Terraform) run as required PR gate checks — not in the deploy pipeline. Branch protection enforces all three checks on main with no admin bypass.</p>
       </div>
 
       <div class="decision">
         <p class="decision__label">6 · Chess Engine</p>
-        <p>WebSocket server handling room creation, game state, and real-time move broadcast. Client-side validation with chess.js for UX speed; server-side validation with Stockfish as the authority. Chess clocks and sound cues built into the game loop.</p>
+        <p>WebSocket server handling room creation, game state, and real-time move broadcast. Client-side validation with chess.js for immediate UX feedback; server-side validation with chess.js as the authoritative source of truth (prevents cheating even though both sides use the same library). The game protocol covers moves, resignation, takeback requests, and a single-pending draw offer flow. 8 sound cues are mapped to game events (move, capture, castle, promotion, check, win, draw, error) using CC0 audio assets with zero library dependencies; the server includes audio metadata (<code>moveType</code>, <code>isCheck</code>) in the <code>move_made</code> event so the server drives the sound trigger type.</p>
       </div>
 
       <div class="decision">
@@ -222,7 +222,7 @@ Static landing / auth       Authenticated gameplay runtime
 
       <div class="decision">
         <p class="decision__label">8 · Social Layer</p>
-        <p>Friends, challenges, and notifications. In progress — the DynamoDB schema and backend endpoints are built; the frontend integration is partially complete.</p>
+        <p>Friends, challenges, game history with full move-by-move replay, and notifications. The DynamoDB schema, backend endpoints, and frontend pages (including a full game replay viewer) are built and wired to live data. A Chess.com account linking feature is also implemented: linking a verified Chess.com account enables a username displacement mechanic — a verified holder can claim a username currently held by an unverified user — and adds a verified badge. Tim approached Chess.com directly for API access for this use case; access was declined. Challenge-to-game flow polish remains in progress.</p>
       </div>
     </section>
 

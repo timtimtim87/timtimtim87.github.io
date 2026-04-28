@@ -80,7 +80,7 @@
         <h2>VPC Architecture</h2>
         <p>
           The network is a three-tier VPC across three Availability Zones in
-          <code>us-east-1</code> (CIDR <code>10.0.0.0/16</code>). Each tier has a distinct
+          <code>us-east-1</code> (CIDR <code>10.20.0.0/16</code>). Each tier has a distinct
           trust level enforced by both route tables and security groups — defense in depth,
           not reliance on a single control.
         </p>
@@ -97,19 +97,19 @@
             <tbody>
               <tr>
                 <td>Public</td>
-                <td><code>10.0.1–3.0/24</code></td>
+                <td><code>10.20.0.0/20, 10.20.16.0/20, 10.20.32.0/20</code></td>
                 <td>ALB, NAT Gateway</td>
                 <td>Inbound + outbound via IGW</td>
               </tr>
               <tr>
                 <td>Private App</td>
-                <td><code>10.0.11–13.0/24</code></td>
+                <td><code>10.20.48.0/20, 10.20.64.0/20, 10.20.80.0/20</code></td>
                 <td>ECS Fargate tasks</td>
                 <td>Outbound only via NAT Gateway</td>
               </tr>
               <tr>
                 <td>Private Data</td>
-                <td><code>10.0.21–23.0/24</code></td>
+                <td><code>10.20.96.0/20, 10.20.112.0/20, 10.20.128.0/20</code></td>
                 <td>ElastiCache Redis</td>
                 <td>None — no internet route</td>
               </tr>
@@ -163,7 +163,7 @@ Redis Security Group</pre>
         </p>
         <p>
           A separate VPC Endpoint security group allows port 443 from the VPC CIDR
-          (<code>10.0.0.0/16</code>) to reach AWS service endpoints — ECR, CloudWatch Logs,
+          (<code>10.20.0.0/16</code>) to reach AWS service endpoints — ECR, CloudWatch Logs,
           Secrets Manager.
         </p>
       </section>
@@ -213,15 +213,17 @@ Redis Security Group</pre>
         </p>
         <pre>terraform/
 ├── modules/
-│   ├── vpc/          # VPC, subnets, IGW, NAT, route tables, endpoints
-│   ├── ecs/          # Cluster identity, IAM roles, security groups
-│   ├── ecs_compute/  # Task definitions, ECS service, autoscaling
-│   ├── alb/          # ALB, target groups, listeners, ACM cert
-│   ├── dynamodb/     # All DynamoDB tables and GSIs
-│   ├── elasticache/  # Redis replication group, subnet group, param group
-│   ├── cognito/      # User pool, app client, Google IdP
-│   ├── route53/      # Hosted zone, alias records, ACM validation
-│   └── monitoring/   # CloudWatch alarms, dashboards, SNS, budgets
+│   ├── vpc/                  # VPC, subnets, IGW, NAT, route tables, endpoints
+│   ├── ecs/                  # IAM task execution role and task role only
+│   ├── ecs_compute/          # ECS cluster, task definition, service, ECR repo, SG
+│   ├── alb/                  # ALB, target groups, listeners, ACM cert
+│   ├── dynamodb/             # All DynamoDB tables and GSIs
+│   ├── elasticache/          # Redis replication group, subnet group, param group
+│   ├── cognito/              # User pool, app client, Google IdP
+│   ├── route53/              # Hosted zone, alias records, ACM validation
+│   ├── monitoring/           # CloudWatch alarms, dashboards, SNS, budgets
+│   ├── static_edge/          # S3 bucket + CloudFront for chess-chat.com apex
+│   └── github_actions_oidc/  # IAM OIDC provider + least-privilege deploy role
 ├── environments/dev/
 │   └── terraform.tfvars
 ├── main.tf           # Module wiring
@@ -230,10 +232,11 @@ Redis Security Group</pre>
 
         <div class="callout">
           <strong>ECS split into two modules.</strong> The ECS identity module (<code>ecs/</code>)
-          creates the cluster, IAM roles, and security groups. The ECS compute module
-          (<code>ecs_compute/</code>) creates task definitions and the service. This split
-          breaks a circular dependency: the Redis security group needs to allow the Fargate
-          task security group as a source, but the task definition needs the Redis endpoint.
+          creates IAM roles and policies only — task execution role and task role. The ECS compute module
+          (<code>ecs_compute/</code>) creates the cluster, task definition, ECS service, Fargate
+          security group, ECR repository, and CloudWatch log group. This split
+          breaks a circular dependency: the Redis security group needs to reference the Fargate
+          task security group as its source, but the task definition needs the Redis endpoint.
           Separating the resources removes the cycle.
         </div>
 
@@ -295,19 +298,23 @@ terraform {
           GitHub's OIDC provider is trusted by an IAM role, and the workflow assumes that role
           for the duration of the pipeline run.
         </p>
-        <p>Pipeline stages on push to <code>main</code>:</p>
+        <p>Deploy pipeline steps on push to <code>main</code> (single job, sequential):</p>
         <ol>
-          <li>Run frontend tests (<code>vitest</code>)</li>
-          <li>Build Docker image</li>
-          <li>Authenticate to AWS via OIDC</li>
-          <li>Push image to ECR with commit SHA tag</li>
-          <li>Update ECS task definition to new image tag</li>
-          <li>Deploy new ECS service revision (rolling update)</li>
-          <li>Static site assets synced to S3 + CloudFront invalidation</li>
+          <li>Checkout source</li>
+          <li>Configure AWS credentials via OIDC</li>
+          <li>Login to Amazon ECR</li>
+          <li>Build Docker image and push to ECR (commit SHA tag + <code>main-latest</code> tag)</li>
+          <li>Generate <code>config.js</code> from GitHub Actions variables (Cognito IDs, app host, cookie config) and sync static auth assets to S3; <code>config.js</code> is uploaded with <code>Cache-Control: no-store</code> so Cognito config changes are immediately live — all other assets use a 5-minute CDN cache</li>
+          <li>Trigger full CloudFront invalidation (<code>/*</code>)</li>
+          <li>Register new ECS task definition revision</li>
+          <li>Deploy ECS service and wait for stable state</li>
+          <li>Upload deployment metadata artifact</li>
         </ol>
         <p>
-          The static site deploy (Step 7) and the ECS deploy (Steps 4–6) are independent
-          pipelines — a frontend-only change does not trigger an ECS deployment.
+          Tests are not part of the deploy pipeline. Backend quality, frontend quality, and Terraform
+          quality checks run only in PR workflows and are enforced as required status checks on
+          <code>main</code> — branch protection is configured with <code>enforce_admins = true</code>
+          and <code>required_conversation_resolution = true</code>, with force-push and deletion disabled.
         </p>
       </section>
 
@@ -400,8 +407,8 @@ terraform {
             </div>
             <div class="schema-card__row">
               <span class="schema-badge schema-badge--sk">SK</span>
-              <span class="schema-card__key">ended_at (N)</span>
-              <span class="schema-card__key-note">Unix timestamp (ms)</span>
+              <span class="schema-card__key">ended_at (S)</span>
+              <span class="schema-card__key-note">ISO 8601 timestamp string</span>
             </div>
           </div>
           <div class="schema-card__section">
@@ -435,7 +442,7 @@ terraform {
         </div>
 
         <h3>Social Tables</h3>
-        <p>Four additional tables support the social layer:</p>
+        <p>Five additional tables support the social layer:</p>
         <div class="schema-grid">
           <div class="schema-card" style="margin:0;">
             <div class="schema-card__header">friendships</div>
@@ -518,12 +525,32 @@ terraform {
               <div class="schema-card__attrs">None</div>
             </div>
           </div>
+
+          <div class="schema-card" style="margin:0;">
+            <div class="schema-card__header">pair_rooms</div>
+            <div class="schema-card__section">
+              <div class="schema-card__section-label">Keys</div>
+              <div class="schema-card__row">
+                <span class="schema-badge schema-badge--pk">PK</span>
+                <span class="schema-card__key">pair_id (S)</span>
+                <span class="schema-card__key-note">Deterministic composite of both user IDs, sorted alphabetically</span>
+              </div>
+            </div>
+            <div class="schema-card__section">
+              <div class="schema-card__section-label">GSIs</div>
+              <div class="schema-card__attrs">None</div>
+            </div>
+          </div>
         </div>
         <p>
           Friendships are written in both directions simultaneously (A→B and B→A), so listing
           a user's friends is a single <code>Query PK=user_id</code> with no GSI required.
           The Challenges table mirrors the two-GSI pattern from Games — a challenge involves
-          two parties and must be visible to both.
+          two parties and must be visible to both. The pair_rooms table stores a persistent
+          room code per friend pair: when a challenge is accepted, the backend derives a
+          deterministic <code>pair_id</code> (both user IDs sorted alphabetically and
+          concatenated) and looks up or creates the room code for that pair, so returning
+          friends always get the same room rather than a new random one each time.
         </p>
       </section>
 
@@ -536,22 +563,40 @@ terraform {
           Redis stores ephemeral session state. All keys have a TTL and are treated as
           disposable — Redis state loss is survivable; DynamoDB loss is not.
         </p>
-        <pre>room:{room_code}          Hash, TTL 60min
-  status                  waiting | active | teardown
-  chime_meeting_id
-  chime_meeting_data      JSON blob
-  participant:{uid}:*     Per-user connection fields
-  active_game             JSON blob (null if no game running)
-  games_played            JSON array of completed summaries
+        <pre>room:{room_code}          String (JSON-encoded), TTL 60min
+  {
+    status,               waiting | active | teardown | terminal
+    chime_meeting_id,
+    chime_meeting_data,
+    participants,         per-user connection state
+    active_game,          null if no game running
+    games_played          array of completed game summaries
+  }
 
-ws:{connection_id}        Hash, TTL 60min
-  user_id
-  room_code
-  connected_at</pre>
+ws:{connection_id}        String (JSON-encoded), TTL 60min
+  { user_id, room_code, connected_at }
+
+room_expiries             Sorted Set (ZSET)
+                          member: room_code, score: expiry Unix timestamp
+                          Background worker scans for expired rooms
+
+room_reconnect_deadlines  Sorted Set (ZSET)
+                          member: room_code, score: reconnect grace deadline timestamp
+                          Background worker scans for elapsed grace periods
+
+game_finalization_queue   List — jobs awaiting DynamoDB write
+game_finalization_deadletter  List — jobs that failed after 5 attempts</pre>
         <p>
-          WebSocket connection state lives in Redis (not in Fargate task memory) so that
-          any task can look up any connection. This is the foundation for distributed
-          WebSocket routing when the single-task guardrail is lifted.
+          Room and connection state is stored as JSON strings using <code>SET</code>/<code>GET</code>,
+          not as Redis Hashes. WebSocket connection state lives in Redis (not in Fargate task memory)
+          so that any task can look up any connection — the foundation for distributed WebSocket routing
+          when the pub/sub relay is added.
+        </p>
+        <p>
+          The two sorted sets enable a background expiry worker to reliably scan for and act on
+          expired rooms and elapsed reconnect grace periods, even when the originating WebSocket
+          connection is gone. This is more robust than relying solely on Redis key TTL, which
+          fires no callback on expiry.
         </p>
       </section>
 
@@ -577,17 +622,19 @@ ws:{connection_id}        Hash, TTL 60min
         <ol>
           <li>Player drags piece — chess.js validates move locally (UX speed)</li>
           <li>Move sent to backend via WebSocket: <code>{ move: "e2e4" }</code></li>
-          <li>Backend validates server-side with Stockfish (security)</li>
+          <li>Backend validates server-side with chess.js (authoritative source of truth)</li>
           <li>Board FEN, move list, and clocks updated in Redis</li>
-          <li>Move broadcast to both clients: <code>move_made</code> event with audio metadata</li>
-          <li>Both frontends update board, clocks, and play sound cue</li>
+          <li>Move broadcast to both clients: <code>move_made</code> event including <code>moveType</code> and <code>isCheck</code> metadata fields — the server drives the sound trigger type</li>
+          <li>Both frontends update board, clocks, and play the mapped sound cue</li>
         </ol>
 
         <h3>Game Completion</h3>
         <ol>
           <li>End condition detected (checkmate / resignation / timeout)</li>
           <li>Game metadata calculated (duration, time remaining, move count)</li>
-          <li>Game record written to DynamoDB — single <code>PutItem</code></li>
+          <li>Finalization job pushed to Redis List (<code>game_finalization_queue</code>) — write is decoupled from the in-flight WebSocket session to survive Fargate task crashes</li>
+          <li>Background worker pops the job and writes to DynamoDB as a conditional <code>PutItem</code> (idempotent — safe to retry)</li>
+          <li>Failed writes retry with exponential backoff (base 250ms, up to 5 attempts); jobs failing all 5 attempts are pushed to <code>game_finalization_deadletter</code></li>
           <li>User stats updated — <code>UpdateItem</code> on Users table</li>
           <li>Active game cleared from Redis room state</li>
           <li><code>game_ended</code> event broadcast to both clients</li>
@@ -610,21 +657,28 @@ User B joins
   │  status: active — Chime meeting created
   ▼
 Games played (unlimited sequential games)
-  │  Each game: Redis active_game → DynamoDB on completion
+  │  Each game: Redis active_game → DynamoDB via finalization queue
   ▼
 Player disconnects
-  │  12-second reconnect grace
+  │  12-second reconnect grace (tracked in room_reconnect_deadlines ZSET)
+  │  Reconnect events carry a reconnectVersion — frontend ignores stale
+  │  updates with version ≤ last seen, preventing UI regression
   │  If grace expires → teardown begins
   ▼
 Both players leave (or grace expires)
+  │  Room transitioned to terminal: true via Redis WATCH/MULTI/EXEC (atomic)
+  │  New join attempts rejected once terminal
   │  Chime meeting deleted
-  │  Active game (if any) written to DynamoDB as abandonment
-  │  Redis room key deleted
+  │  Active game (if any) queued for DynamoDB write
+  │  DEL room:{code} + ZREM from both sorted sets
   ▼
 Room consumed — code is single-use</pre>
         <p>
-          The tombstone (record that the room existed and was torn down) is written atomically
-          with the Redis deletion to prevent race conditions on room code reuse.
+          The terminal state transition is atomic (Redis optimistic locking via
+          <code>WATCH/MULTI/EXEC</code>). The subsequent cleanup — <code>DEL</code> and
+          removal from the two sorted sets — runs as separate commands after the transition
+          is confirmed. Single-use enforcement relies on the terminal state check: new join
+          attempts are rejected once the room is terminal, before the key is deleted.
         </p>
       </section>
 
@@ -728,28 +782,54 @@ Room consumed — code is single-use</pre>
       <!-- ── Observability ──────────────────────────────────── -->
       <section id="observability">
         <h2>Observability</h2>
-        <h3>Alarms</h3>
+        <h3>Infrastructure Alarms</h3>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Metric</th><th>Threshold</th><th>Severity</th></tr></thead>
+            <thead><tr><th>Metric</th><th>Threshold</th><th>Window</th></tr></thead>
             <tbody>
-              <tr><td>ECS CPU utilisation</td><td>&gt; 80% for 5 min</td><td>Warning</td></tr>
-              <tr><td>ECS CPU utilisation</td><td>&gt; 95% for 5 min</td><td>Critical</td></tr>
-              <tr><td>ECS memory utilisation</td><td>&gt; 85% for 5 min</td><td>Warning</td></tr>
-              <tr><td>ALB 5xx errors</td><td>&gt; 10 in 5 min</td><td>Critical</td></tr>
-              <tr><td>ALB unhealthy targets</td><td>&gt; 0 for 2 min</td><td>Critical</td></tr>
+              <tr><td>ECS CPU utilisation</td><td>≥ 75%</td><td>1 × 5-min period</td></tr>
+              <tr><td>ECS memory utilisation</td><td>≥ 80%</td><td>1 × 5-min period</td></tr>
+              <tr><td>ALB 5xx errors</td><td>≥ 5 in period</td><td>1 × 5-min period</td></tr>
+              <tr><td>ALB unhealthy targets</td><td>&gt; 0</td><td>2 × 5-min periods (10 min effective); treat_missing_data = breaching — catches scale-to-zero</td></tr>
+              <tr><td>ALB healthy hosts low</td><td>HealthyHostCount &lt; 1</td><td>treat_missing_data = breaching</td></tr>
               <tr><td>DynamoDB throttled requests</td><td>Any</td><td>Warning</td></tr>
-              <tr><td>Redis CPU</td><td>&gt; 90% for 10 min</td><td>Critical</td></tr>
-              <tr><td>Daily cost</td><td>&gt; $10/day</td><td>Budget alert</td></tr>
+              <tr><td>Redis CPU</td><td>≥ 75%</td><td>2 × 5-min periods</td></tr>
+              <tr><td>Monthly cost</td><td>80% / 90% / 100% of $100 budget</td><td>Percentage alerts</td></tr>
             </tbody>
           </table>
         </div>
+
+        <h3>Application Metrics</h3>
+        <p>
+          8 custom metrics are emitted to CloudWatch in the <code>Chesschat/Dev</code> namespace
+          from the backend service (<code>src/services/metrics.js</code>):
+        </p>
+        <ul>
+          <li><code>WsConnectionsOpened</code> / <code>WsConnectionsClosed</code></li>
+          <li><code>GamesStarted</code> / <code>GamesEnded</code></li>
+          <li><code>GamePersistSucceeded</code> / <code>GamePersistRetried</code> / <code>GamePersistFailed</code></li>
+          <li><code>AppErrors</code></li>
+        </ul>
+        <p>
+          These appear alongside infrastructure metrics on the CloudWatch operations dashboard.
+          The three <code>GamePersist*</code> metrics track the finalization worker's reliability
+          in real time — retries and dead-letters are immediately visible without log parsing.
+        </p>
+
         <h3>Logging</h3>
         <p>
           Application logs write to CloudWatch Logs via the <code>awslogs</code> driver in
           the ECS task definition. Log group <code>/ecs/chesschat/application</code>,
           30-day retention. VPC Flow Logs write all traffic to a separate log group,
-          7-day retention.
+          30-day retention.
+        </p>
+        <p>
+          Every HTTP request receives an <code>x-correlation-id</code> header in the response
+          (either the client-supplied value, or a generated UUID). The ID is logged alongside
+          method, path, status, and latency in the structured access log. WebSocket sessions
+          log a <code>sessionId</code> and <code>connectionId</code> for the same purpose.
+          The triage runbook uses correlation IDs as the primary drill-down path: start from
+          a CloudWatch alarm, find the log entries by correlation ID, trace the request end to end.
         </p>
       </section>
 
@@ -763,14 +843,14 @@ Room consumed — code is single-use</pre>
             <thead><tr><th>Service</th><th>Monthly (portfolio phase)</th><th>Notes</th></tr></thead>
             <tbody>
               <tr><td>NAT Gateway (1x)</td><td>~$35</td><td>Fixed + data transfer</td></tr>
-              <tr><td>ECS Fargate (2 tasks baseline)</td><td>~$26</td><td>Scales with load</td></tr>
+              <tr><td>ECS Fargate (1 task baseline — 0.25 vCPU, 512 MiB)</td><td>~$10</td><td>Scales with load</td></tr>
               <tr><td>ALB</td><td>~$21</td><td>Fixed + LCU charges</td></tr>
               <tr><td>ElastiCache Redis</td><td>~$22</td><td>1 primary + 1 replica, t4g.micro</td></tr>
               <tr><td>VPC Interface Endpoints (4x)</td><td>~$28</td><td>Eliminates NAT data charges on AWS API calls</td></tr>
               <tr><td>Chime SDK</td><td>~$10–40</td><td>Variable — $0.0017/attendee-min</td></tr>
               <tr><td>DynamoDB (on-demand)</td><td>~$5</td><td>Scales with usage</td></tr>
               <tr><td>CloudWatch, Route 53, misc</td><td>~$5</td><td></td></tr>
-              <tr><td><strong>Total</strong></td><td><strong>~$150–180</strong></td><td>Portfolio phase</td></tr>
+              <tr><td><strong>Total</strong></td><td><strong>~$130–160</strong></td><td>Portfolio phase</td></tr>
             </tbody>
           </table>
         </div>
