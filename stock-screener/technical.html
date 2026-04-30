@@ -129,8 +129,7 @@
         <p>
           In a production system, the functions would have separate roles: the bot would be
           read-only on S3, and each function's SSM access would be scoped to only the
-          parameters it actually reads. For a personal single-account project, one shared
-          role is a pragmatic simplification — but it's worth naming as such.
+          parameters it actually reads.
         </p>
       </section>
 
@@ -142,27 +141,18 @@
           Both Lambda functions run in AWS's default managed environment — no VPC
           configuration. This is a deliberate cost decision.
         </p>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Option</th><th>Monthly cost</th><th>Why rejected</th></tr></thead>
-            <tbody>
-              <tr><td>No VPC (current)</td><td>$0</td><td>—</td></tr>
-              <tr><td>VPC + NAT Gateway</td><td>~$45</td><td>Disproportionate for personal tool</td></tr>
-              <tr><td>VPC + Interface Endpoints</td><td>~$14+</td><td>Same — overkill for this workload</td></tr>
-            </tbody>
-          </table>
-        </div>
+
         <p>
-          Lambda accesses S3 and Parameter Store through AWS internal service endpoints —
-          traffic routes over AWS's backbone without traversing the public internet.
+          Lambda accesses S3 and Parameter Store through AWS internal service endpoints.
+          Data routes over AWS's backbone without traversing the public internet.
           External API calls to Polygon, Alpaca, and Telegram use standard HTTPS.
-          For a personal trading tool, this is the correct tradeoff.
+          For a personal trading tool, this is totally fine.
         </p>
         <div class="callout">
           <strong>When VPC would make sense.</strong> If this system handled PII, processed
           financial transactions, or needed to access resources inside a private network
           (e.g. a private RDS instance), VPC deployment would be justified. For Lambda
-          reading and writing CSV files and calling public APIs, it adds no security value.
+          reading and writing CSV files and calling public APIs, it doesn't add much security value.
         </div>
       </section>
 
@@ -197,8 +187,7 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         <p>
           Data collector: 900 seconds (the AWS hard ceiling for Lambda). The function
           processes ~900 stocks sequentially with rate-limit pauses built in — a recorded
-          production run completed in 81.65 seconds, well within the limit but enough to
-          rule out a shorter timeout. Bot function: 60 seconds, sufficient for S3 reads
+          production run completed in 81.65 seconds. Bot function: 60 seconds, sufficient for S3 reads
           and Alpaca API calls.
         </p>
       </section>
@@ -210,20 +199,19 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         <p>
           The data collector triggers daily at 6 AM ET via an EventBridge cron rule.
           This runs before US market open (9:30 AM ET), using the previous day's EOD
-          data from Polygon which is available overnight.
+          data from Polygon.
         </p>
         <pre>ScheduleExpression: cron(0 11 * * ? *)</pre>
         <p>
           EventBridge delivers the event to the Lambda function. If the invocation fails,
           Lambda has built-in retry logic (2 retries by default for async invocations).
-          A dead-letter queue could capture failed events for later inspection — not
-          implemented in v1 but a natural next step.
+          A dead-letter queue could capture failed events for later inspection.
         </p>
         <div class="callout callout--warn">
-          <strong>Silent failure discovered post-deployment.</strong> When the Polygon
-          subscription lapsed, the Lambda function executed successfully, logged
-          "downloaded data for 0 stocks," and reported success. No alarm fired. The fix
-          is twofold: validate that the ingested dataset is non-empty and date-fresh before
+          <strong>Silent failure discovered post-deployment.</strong> I cancelled my Polygon
+          subscription, forgot that I was using Polygon for this project, and kept checking my Telegram bot, and nothing seemed wrong. The Lambda function executed successfully and
+          reported success. No alarm fired. What happened was it successfully worked and downloaded data for "0 stocks". The fix
+          is... validate that the ingested dataset is non-empty and "has today's date" before
           writing to S3, failing the Lambda explicitly if <code>stocks_analyzed == 0</code>;
           and publish <code>stocks_analyzed</code> as a CloudWatch custom metric on each run,
           with an alarm that fires via SNS if the value drops below a threshold or the
@@ -260,8 +248,7 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           S3 versioning is enabled on the bucket. Without a lifecycle policy, each daily
           overwrite of the candidates file creates a new version while retaining all previous
           ones — the bucket grows unboundedly. A lifecycle rule expiring non-current versions
-          after 1 day is the fix, and is documented in Operational Learnings. It has not yet
-          been applied to the template.
+          after 1 day is the fix. It has not yet been applied to the template.
         </p>
       </section>
 
@@ -284,8 +271,7 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           the IAM policy scope. <code>chat_id</code> is not a credential but an authorised
           user identifier — the bot reads it at runtime to validate incoming Telegram
           messages before executing any command. Parameters are encrypted at rest by KMS.
-          No credentials are stored in environment variables, Lambda configuration, or
-          source code.
+          No credentials are stored in environment variables.
         </p>
         <p>
           Parameter Store was chosen over Secrets Manager for this use case — standard
@@ -303,12 +289,11 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         <ol>
           <li>EventBridge fires cron rule, invokes Data Collector Lambda</li>
           <li>Lambda retrieves Polygon and Alpaca credentials from Parameter Store</li>
-          <li>Calls Polygon snapshot endpoint — fetches current price, high, and volume for ~900 Russell 1000 stocks</li>
-          <li>For each stock with snapshot data, calls Polygon historical bars endpoint to calculate custom metrics</li>
+          <li>Calls Polygon snapshot endpoint — fetches data for ~900 Russell 1000 stocks</li>
           <li>Ranks all stocks by strategy metric, selects top 10 candidates</li>
-          <li>Calls Alpaca positions endpoint — fetches current holdings with entry price, current price, and unrealized P&amp;L</li>
+          <li>Calls Alpaca positions endpoint — fetches current holdings data</li>
           <li>Writes three files to S3: full ranked universe (appended), top 10 candidates (overwritten), portfolio snapshot (appended)</li>
-          <li>Lambda exits — compute cost ends</li>
+          <li>Lambda exits</li>
         </ol>
 
         <h3>On-Demand Query (Telegram commands)</h3>
@@ -322,7 +307,7 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           <li>Formats results into a Telegram message and sends via Telegram Bot API</li>
           <li>Lambda exits</li>
         </ol>
-        <p>Several commands were implemented, though in practice <code>/daily</code> was the one used most — the others were mostly useful during development and testing.</p>
+        <p>Several commands were implemented, though in practice <code>/daily</code> was the one used most.</p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Command</th><th>What it does</th></tr></thead>
@@ -362,8 +347,7 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         <div class="callout callout--warn">
           <strong><code>/trigger</code> uses fragile function discovery.</strong> The command
           scans all Lambda functions in the account and matches by name substring. Renaming
-          the collector function breaks <code>/trigger</code> silently — no error at deploy
-          time. The correct approach is to pass the collector's ARN as an environment variable
+          the collector Lambda function would break <code>/trigger</code> silently. The correct approach is to pass the collector's ARN as an environment variable
           at deploy time (<code>!GetAtt DataCollectorFunction.Arn</code> in the SAM template),
           which would also allow the <code>lambda:InvokeFunction</code> permission to be
           scoped to that specific ARN instead of <code>*</code>.
@@ -377,18 +361,15 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         <p>
           CloudWatch log groups are defined in the SAM template with explicit retention
           policies: 30 days for the data collector, 14 days for the bot. CloudWatch Logs
-          charges for storage, so unbounded retention accumulates cost quietly. The shorter
-          retention on the bot reflects how long its logs are operationally useful — a bot
-          query log from two weeks ago has no diagnostic value.
+          charges for storage, so unbounded retention accumulates cost quietly.
         </p>
         <div class="callout callout--warn">
           <strong>No alarms are configured.</strong> This is the root cause of the silent
-          failure described in Operational Learnings — the collector completed with exit
+          failure described previously — the collector completed with exit
           code 200 while processing zero stocks, and nothing fired. The fix is a CloudWatch
           alarm on a custom metric: the Lambda should publish <code>stocks_analyzed</code>
           on each run, with an alarm that triggers an SNS notification if the value is zero
-          or the function hasn't run within the expected window. A dead-letter queue on the
-          EventBridge rule would capture invocation failures separately.
+          or if the function hasn't run within the expected window.
         </div>
       </section>
 
@@ -413,8 +394,7 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         </div>
         <p>
           The entire system operates within AWS free tier limits. The only meaningful cost
-          is the Polygon API subscription (~$29/month for the data feed), which is external
-          to AWS.
+          was the Polygon API subscription.
         </p>
       </section>
 
@@ -426,12 +406,11 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           <li>
             <strong>Silent failures are worse than loud failures.</strong> A Lambda that
             completes successfully with empty output is harder to detect than one that
-            throws an exception. Data validation should be a first-class concern, not
-            an afterthought.
+            throws an exception. Data validation is required if I do another similar project.
           </li>
           <li>
             <strong>S3 versioning requires a lifecycle policy.</strong> Enabling versioning
-            without expiry rules causes unbounded storage growth on any bucket with regular
+            without expiry rules causes exponential storage growth on any bucket with regular
             overwrites.
           </li>
           <li>
@@ -445,7 +424,7 @@ Init Duration: 3354.69 ms   ← cold start</pre>
             Build for what you actually need, extend when you need more.
           </li>
           <li>
-            <strong>Right-size the solution.</strong> S3 CSV over RDS, Lambda over EC2,
+            <strong>Right-size the solution.</strong> S3 CSV files over RDS, Lambda over EC2,
             Parameter Store over Secrets Manager — each decision was made by asking
             "what does this workload actually need?" not "what is the most sophisticated option?"
           </li>

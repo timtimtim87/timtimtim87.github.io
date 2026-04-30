@@ -24,10 +24,10 @@
   <div class="container">
 
     <header class="page-header">
-      <p class="page-header__eyebrow">Serverless · Data Pipeline · Personal Tool</p>
+      <p class="page-header__eyebrow">Serverless · Data Pipeline · APIs</p>
       <h1 class="page-header__title">AWS Stock Screener</h1>
       <p class="page-header__subtitle">
-        Serverless stock screening and portfolio tracker with Telegram bot interface.
+        Serverless stock screener and portfolio tracker with Telegram bot interface.
         Cost ~$0/month.
       </p>
       <div class="tags" style="margin-top:1.25rem;">
@@ -48,13 +48,11 @@
     <section style="padding-top:2.5rem;">
       <h2>The Problem</h2>
       <p>
-        I had developed a systematic trading strategy that I wanted to test with a paper trading account. I needed a daily ranked list of entry signals from a large stock watchlist, and a custom view of my active positions which was related to the exit strategy.
-        No commercial tool offered the right combination. Bloomberg Terminal
-        is prohibitively expensive, TradingView doesn't support fully custom metrics, and
-        every dollar spent on tooling subtracts directly from trading returns.
+        I had developed a systematic trading strategy that I wanted to test with a paper trading account. I needed a daily ranked list of entry signals from a large stock watchlist, and a custom view of my active positions which was designed based on my exit strategy logic.
+        No commercial software offered the right combination.
       </p>
       <p>
-        The solution needed to be cheap to run, accessible from my phone, and flexible enough
+        The solution needed to be cheap to run, have a visual dashboard, and flexible enough
         to evolve with the strategy.
       </p>
     </section>
@@ -77,7 +75,6 @@
           <tbody>
             <tr><td>~1,000 stocks screened and ranked daily before market open</td></tr>
             <tr><td>Top candidates delivered to Telegram on demand</td></tr>
-            <tr><td>Custom position metrics unavailable in off-the-shelf tools</td></tr>
             <tr><td>Replaced a slow, inconsistent manual workflow</td></tr>
             <tr><td>Runs at ~$0–2/month (mostly within free tier)</td></tr>
           </tbody>
@@ -88,11 +85,7 @@
     <section style="padding-top:2rem;">
       <h2>The Solution — Two Flows</h2>
       <p>
-        Two Lambda functions, two trigger mechanisms, one storage layer, one credential store.
-        The two flows share state only through S3 — neither knows the other exists at runtime.
-        A failed collection run doesn't affect the bot's ability to serve the last good data,
-        and a bot failure doesn't disrupt collection. The CSV outputs are also inspectable
-        locally by downloading them directly from S3.
+        Below is the diagrams for the flows.
       </p>
 
       <h3 style="margin-top:2rem;">Flow 1 — Daily Data Collection</h3>
@@ -111,8 +104,7 @@
         <p class="decision__label">Decision · Compute</p>
         <p>
           <strong>Lambda over EC2 or ECS.</strong> The workload runs once daily plus sporadic
-          bot queries — compute sits idle 23+ hours per day. EC2 would cost $30–50/month for
-          an always-on instance. Lambda costs ~$1–2/month (mostly free tier) and scales
+          bot queries, which means I don't need consistently available compute resources. I would be paying for EC2 and not utilising its computing capacity. Lambda should be within the free tier. Plus it scales
           automatically. The two functions are sized differently: the data collector runs
           at 1,024 MB because it builds pandas DataFrames from ~900 API responses in memory;
           the bot runs at 512 MB because its work is JSON parsing and S3 reads. Lambda
@@ -127,8 +119,8 @@
           <strong>S3-based file storage over RDS or DynamoDB.</strong> RDS costs $20+/month
           minimum for an idle instance and adds VPC networking overhead. DynamoDB would require
           designing partition keys before knowing future analysis needs, and makes local data
-          exploration harder. S3 costs ~$0.30/month, works natively with Python/pandas, and
-          allows downloading files for local analysis whenever needed. The data access pattern
+          exploration harder. S3 costs ~$0.30/month, and
+          I can download files for local analysis whenever I needed. The data access pattern
           is append-only writes and occasional full reads.
         </p>
       </div>
@@ -138,12 +130,12 @@
         <p>
           <strong>Parameter Store over environment variables or Secrets Manager.</strong>
           Parameter Store integrates natively with Lambda via IAM, includes KMS encryption,
-          and costs nothing for standard parameters. API keys are fetched at runtime —
-          never hardcoded, never committed to git, never in plaintext environment variables.
+          and costs nothing for standard parameters. API keys are fetched at runtime by the Lambda function. The API keys were
+          never hardcoded, were never committed to git, and never saved in plaintext environment variables.
           Secrets Manager would be the right choice if rotation were needed; for static API
           keys, Parameter Store is the simpler and cheaper option. IAM access is scoped to
           the <code>/screener/*</code> parameter path — not all of Parameter Store. S3 access
-          is scoped to the specific bucket ARN. The bot also performs application-level
+          is scoped to the specific bucket ARN. The Telegram bot also performs application-level
           authorization: each incoming message has its <code>chat_id</code> validated against
           an authorized value stored in Parameter Store. Requests from unrecognized chat IDs
           are rejected before any data is fetched.
@@ -156,9 +148,7 @@
           <strong>Webhook mode over polling.</strong> In polling mode, a long-running process
           continuously calls Telegram's API asking for new messages — requiring always-on
           compute. In webhook mode, Telegram calls the API Gateway endpoint the moment a
-          message arrives, Lambda handles it and shuts down. There is no idle cost and no
-          process to manage. This is consistent with the rest of the system — everything is
-          event-driven and stateless.
+          message arrives (what I type in Telegram), Lambda handles it and shuts down.
         </p>
       </div>
 
@@ -167,7 +157,7 @@
         <p>
           <strong>Lambda in public mode, no VPC configuration.</strong> Lambda accesses S3
           and Parameter Store through AWS internal service endpoints without a VPC. Adding
-          a VPC would require a NAT Gateway (~$45/month) or VPC endpoints (~$7/service/month)
+          a VPC would require a NAT Gateway (~$40/month) or VPC endpoints (~$7/service/month)
           for internet access. For this workload, VPC deployment adds cost and networking
           complexity without materially improving the security posture.
         </p>
@@ -183,13 +173,9 @@
       <ul>
         <li><strong>Query volume increased substantially</strong> — reading full CSVs on every bot request doesn't scale. A metadata index or DynamoDB layer for keyed lookups would be the next step.</li>
         <li><strong>Latency became critical</strong> — cold Lambda starts and S3 reads add up. A warm cache layer would help.</li>
-<li><strong>The data model grew more complex</strong> — CSV works well for flat tabular data. Parquet + Athena would be a better fit for larger datasets with ad hoc query needs.</li>
-        <li><strong>The <code>/trigger</code> command is fragile</strong> — it discovers the collector Lambda by scanning all functions in the account and matching on a name substring. Renaming the collector function breaks <code>/trigger</code> silently, with no error at deploy time. The correct approach is to pass the collector's ARN as an environment variable at deploy time, making the dependency explicit.</li>
+        <li><strong>The data model grew more complex</strong> — CSV works well for flat tabular data. Parquet + Athena would be a better fit for larger datasets with ad hoc query needs.</li>
+        <li><strong>The <code>/trigger</code> command is fragile</strong> — it discovers the collector Lambda by scanning all functions in the account and matching the name of the Lambda function. Renaming the collector function would break the <code>/trigger</code> silently, with no error. The correct approach is to pass the collector's ARN as an environment variable at deploy time, making the dependency explicit.</li>
       </ul>
-      <p>
-        For the actual use case — one strategy, daily batch — none of these constraints are
-        relevant, and the simplicity of the design is the point.
-      </p>
     </section>
 
     <section style="padding-top:2rem;">
@@ -201,8 +187,7 @@
           success. The fix is two things: validate that the ingested data has today's date
           before writing to S3, and publish a <code>stocks_analyzed</code> metric to
           CloudWatch on each run with an alarm that fires if the value drops to zero or
-          the function hasn't run within the expected window. That combination would have
-          caught the lapse within one business day.
+          the function hasn't run within the expected window.
         </li>
         <li>
           <strong>Resource tagging from day one.</strong> Running multiple projects in one

@@ -73,22 +73,16 @@
         <p>
           The static website (HTML, CSS, JavaScript) is hosted in a private S3 bucket and
           delivered through CloudFront. CloudFront serves as the only access point —
-          the S3 bucket has no public access.
+          the S3 bucket has no public access. S3 versioning is enabled on the bucket — files are encrypted at rest with SSE-AES256.
         </p>
         <img src="SUDOKOO.jpg" alt="Sudoku architecture flow diagram" style="width:100%; border-radius:8px; margin:1rem 0;" />
-        <p>
-          The CloudFront distribution is configured with <code>PriceClass_100</code>, which
-          restricts edge locations to the US, Canada, and Europe. This reduces cost by
-          excluding more expensive regions while covering the expected user base.
-          S3 versioning is enabled on the bucket — files are encrypted at rest with SSE-AES256.
-        </p>
         <p>
           CloudFront provides two key benefits beyond CDN caching:
         </p>
         <ol>
           <li>
-            <strong>HTTPS enforcement.</strong> CloudFront redirects HTTP to HTTPS. This is
-            required for browser camera access — browsers restrict the camera API to secure
+            <strong>HTTPS enforcement.</strong> My CloudFront distribution redirects HTTP to HTTPS. HTTPS is
+            required for browsers to allow camera access — browsers restrict camera APIs to secure
             contexts only.
           </li>
           <li>
@@ -120,14 +114,9 @@
 }</pre>
         <p>
           The condition scopes access to this specific distribution ARN — not all CloudFront
-          distributions in the account, not the CloudFront service generally. Even if someone
+          distributions in the account, and also not the CloudFront service generally. Even if someone
           created another CloudFront distribution pointing at this bucket, the bucket policy
-          would reject requests from it. This is a meaningful isolation boundary.
-        </p>
-        <p>
-          OAC replaces the older Origin Access Identity (OAI) mechanism. OAC supports
-          additional S3 features (SSE-KMS buckets, multi-region access points) and is
-          the current AWS recommendation.
+          would reject requests from it.
         </p>
       </section>
 
@@ -149,9 +138,8 @@ Access-Control-Allow-Headers: Content-Type</pre>
           browser-based requests to the API — not just the portfolio site. Combined with
           the fact that the API endpoint URL is visible in the page's JavaScript source,
           there is no practical barrier to another site calling this API. This was a
-          learning gap — if rebuilding, the origin would be restricted to the specific
-          CloudFront domain, and the API would sit behind an API key or a Cognito
-          authorizer so that only authenticated requests can reach the Lambda function.
+          learning gap, and only something I realised after deploying this web application. If I decided to rebuild this, the origin would be restricted to the specific
+          CloudFront domain. Other methods of securing access would be to utilise API keys so that only authenticated requests can reach the Lambda function.
         </p>
       </section>
 
@@ -179,7 +167,7 @@ Access-Control-Allow-Headers: Content-Type</pre>
         <p>
           Memory at 512 MB handles base64 encoding of a typical phone camera image
           (3–8 MB JPEG → ~4–11 MB base64) in memory. CloudWatch logs confirm actual
-          usage is well below 512 MB.
+          usage is well below 512 MB. If I had hundreds, or thousands of actual Lambda invocations, I would be able to optimise the memory (and therefore compute) from the log data I collect. There is a tool called "aws-lambda-power-tuning" which is open source software that allows me to optimise my lambda function for cost.
         </p>
       </section>
 
@@ -199,18 +187,9 @@ Access-Control-Allow-Headers: Content-Type</pre>
           the URL can trigger the Lambda, which calls Bedrock and incurs a charge. IAM
           correctly scopes what Lambda is permitted to do, but IAM doesn't control who is
           allowed to trigger Lambda in the first place. If rebuilding this, the right
-          approach would be an API Gateway usage plan with a per-key rate limit to cap
-          costs, and ideally a Cognito authorizer or Lambda authorizer to verify the
-          request is coming from a legitimate user of the application. The default
-          throttle limits (10,000 req/s) are far too high to act as a meaningful guardrail.
+          approach would be to utilise an API Gateway usage plan with a per-key rate limit to cap
+          costs. The default throttle limits (10,000 req/s) are far too high to act as a meaningful guardrail.
         </p>
-        <div class="callout">
-          <strong>Binary media type handling.</strong> The image is encoded as base64 by the
-          browser before sending — the Lambda function receives a base64 string, not raw binary.
-          This avoids configuring API Gateway binary media types, which adds complexity.
-          The tradeoff is ~33% payload size overhead from base64 encoding, acceptable for
-          images up to ~10 MB.
-        </div>
       </section>
 
       <hr class="section-divider" />
@@ -218,8 +197,7 @@ Access-Control-Allow-Headers: Content-Type</pre>
       <section id="network">
         <h2>Network Design</h2>
         <p>
-          Lambda runs in AWS's managed environment with no VPC configuration. This is
-          identical to the Stock Screener decision — the workload calls public APIs (Bedrock)
+          Lambda runs in AWS's managed environment with no VPC configuration. The workload calls public APIs (Bedrock)
           and accesses AWS-internal services (S3), neither of which requires VPC deployment.
         </p>
         <p>
@@ -228,7 +206,7 @@ Access-Control-Allow-Headers: Content-Type</pre>
           traverses the public internet.
         </p>
         <p>
-          The key question when evaluating VPC deployment: <em>does this workload need to
+          The key question when evaluating VPC deployment is... <em>does this workload need to
           access private network resources?</em> For SUDOKOO, the answer is no. All resources
           are either AWS managed services (accessible internally) or public APIs (HTTPS).
         </p>
@@ -239,9 +217,9 @@ Access-Control-Allow-Headers: Content-Type</pre>
       <section id="bedrock">
         <h2>Bedrock Integration</h2>
         <p>
-          Amazon Bedrock provides managed access to foundation models without infrastructure
-          management. The Lambda function (Node.js, AWS SDK v3) calls the Bedrock runtime
-          API with the image and a structured extraction prompt.
+          Amazon Bedrock provides managed access to foundation AI models without infrastructure
+          management. The Lambda function calls the Bedrock
+          API with the image data and a prompt for obtaining a structured puzzle data response.
         </p>
         <pre>// Lambda handler (simplified)
 const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
@@ -275,20 +253,13 @@ const response = await client.send(new InvokeModelCommand({
   })
 }));</pre>
         <p>
-          Claude is asked to return JSON only — no prose. The Lambda strips markdown fences
+          Claude is asked to return JSON only. The Lambda code also strips markdown "wrapper"
           as a fallback if Claude wraps the response. After extraction and puzzle validation,
           the Lambda runs its own backtracking solver and returns both the puzzle and solution
           to the frontend. Claude handles extraction; Lambda handles solving; the browser
           handles gameplay and validates each move against the stored solution in real time.
         </p>
-        <h3>Why Claude 3.5 Sonnet specifically?</h3>
-        <p>
-          Claude 3.5 Sonnet offers the best combination of vision capability and cost
-          efficiency in the Bedrock model catalogue. Claude 3 Opus has slightly better
-          reasoning but costs ~5x more per token — not justified for a grid extraction task.
-          Claude 3 Haiku is cheaper but vision capability is less reliable for structured
-          extraction with ambiguous handwriting.
-        </p>
+
       </section>
 
       <hr class="section-divider" />
@@ -302,20 +273,16 @@ const response = await client.send(new InvokeModelCommand({
         <ol>
           <li>
             <strong>Grid alignment errors.</strong> Correct digit values placed in adjacent
-            cells — typically off by one row or column. These pass character recognition
-            but fail puzzle validation (duplicate values in row/column/box).
+            cells — typically off by one row or column.
           </li>
           <li>
             <strong>Character recognition errors.</strong> Digits misread — most commonly
             <code>1</code> read as <code>7</code>, or <code>6</code> read as <code>8</code>.
-            These may pass puzzle validation if the misread doesn't create an immediate
-            conflict, producing a subtly wrong puzzle.
           </li>
         </ol>
         <p>
           The built-in puzzle validity checker (verifying no duplicate values in any
-          row, column, or 3×3 box) catches alignment errors. Character recognition errors
-          are harder to detect automatically without a reference answer.
+          row, column, or 3×3 box) catches alignment errors.
         </p>
         <p>
           Overall success rate: approximately 50%. For a single-user personal tool,
@@ -342,18 +309,17 @@ const response = await client.send(new InvokeModelCommand({
           <li>
             <strong>CI/CD pipeline.</strong> Manual S3 upload + CloudFront invalidation per
             frontend change was the most operationally painful part of this project. A GitHub
-            Actions workflow (push to main → S3 sync → invalidation) would take 30 minutes to
-            implement and save significant time on any future iteration.
+            Actions workflow (push to main → S3 sync → invalidation) would take no time to
+            implement and save significant time on all future iterations.
           </li>
           <li>
             <strong>Confidence threshold and retry.</strong> If Bedrock returns a response with
             validation errors, automatically retry with a prompt variation before returning
-            failure to the user. One retry would likely push success rate above 70%.
+            failure to the user.
           </li>
           <li>
             <strong>Resource tagging.</strong> All resources should be tagged from day one
-            for cost attribution and resource management. Lessons learned from the
-            Stock Screener project not applied here — a mistake not to repeat.
+            for cost attribution and resource management.
           </li>
         </ul>
       </section>
@@ -368,20 +334,15 @@ const response = await client.send(new InvokeModelCommand({
         <ul>
           <li>
             <strong>AWSLambdaBasicExecutionRole</strong> — AWS managed policy, attached directly.
-            Grants CloudWatch Logs write access across all log groups. Broader than strictly
-            necessary, but standard practice for Lambda functions and the simplest correct option.
+            Grants CloudWatch Logs write access across all log groups.
           </li>
           <li>
             <strong>Custom inline policy</strong> — <code>bedrock:InvokeModel</code> scoped to
             the specific model ARN: <code>anthropic.claude-3-5-sonnet-20241022-v2:0</code>.
-            The function cannot invoke any other Bedrock model.
+            The function cannot invoke any other Bedrock model. Switching to a different model requires an explicit IAM update.
           </li>
         </ul>
-        <p>
-          The Bedrock scope is tight by design. Switching to a different model requires an
-          explicit IAM update — there is no ambient permission to call whatever model is
-          cheapest or newest at the time.
-        </p>
+
       </section>
 
       <hr class="section-divider" />
@@ -401,7 +362,7 @@ const response = await client.send(new InvokeModelCommand({
         </div>
         <p>
           Uploaded images are not stored — they are processed in Lambda memory and discarded.
-          No user data persists beyond the duration of the Lambda invocation.
+          No user data persists beyond the duration of the Lambda invocation. Saving the images would help me build up a training dataset for training custom ML models in the future (if I was to continue building this).
         </p>
       </section>
 
@@ -411,18 +372,15 @@ const response = await client.send(new InvokeModelCommand({
         <h2>WAF Decision</h2>
         <p>
           AWS WAF was deployed initially with three managed rules: SQL injection protection,
-          XSS protection, and the common ruleset (CRS). Cost: $8/month fixed plus per-request
-          charges.
+          XSS protection, and the common ruleset (CRS). Cost: $8/month. It is a layer 7 (application layer) security feature, not deep infra security.
         </p>
         <p>
-          For a single-user portfolio project with no user accounts, no stored data, and no
-          financial transactions, $8/month is disproportionate. WAF was removed.
+          For a hobby project, a single-user portfolio project with no real traffic, no user accounts, no stored data, and no
+          financial transactions, $8/month seemed expensive.
         </p>
         <p>
-          The decision criteria for reinstatement: authenticated users, stored PII, payment
-          processing, or traffic patterns suggesting active abuse. None of these apply.
-          Documenting the decision and the criteria for reversal is more useful than leaving
-          WAF in place at unjustified cost.
+          If this was a "real webapp" with actual traffic, authenticated users, stored PII, payment
+          processing, I would reapply the WAF.
         </p>
       </section>
 
@@ -445,14 +403,10 @@ const response = await client.send(new InvokeModelCommand({
           </table>
         </div>
         <p>
-          Bedrock pricing for Claude 3.5 Sonnet: $3/1M input tokens + $15/1M output tokens.
-          A typical image scan uses ~1,500 input tokens (image + prompt) and ~200 output tokens.
-          Cost per scan: approximately $0.007. At any personal usage level, this is negligible.
-        </p>
-        <p>
-          At scale (e.g. 10,000 scans/month): ~$70/month in Bedrock costs. At that point,
-          evaluating a custom fine-tuned model on SageMaker would make sense — higher upfront
-          cost offset by much lower per-inference pricing.
+          Bedrock pricing for Claude 3.5 Sonnet is based on input and output tokens.
+          Estimated cost per scan was calculated using typical token usage and AWS
+          published pricing. Actual costs can be observed in Cost Explorer at an
+          aggregate level, but per-request cost requires custom logging of token usage.
         </p>
       </section>
 
@@ -462,19 +416,10 @@ const response = await client.send(new InvokeModelCommand({
         <h2>Deployment Process</h2>
         <p>
           Infrastructure was initially set up through the AWS console. The goal was
-          building hands-on understanding of each service's configuration options before
-          capturing them in code. A CloudFormation template (<code>sudokoo-infrastructure.yaml</code>)
-          was written to define the full stack, and a <code>deploy.sh</code> script was
-          written to automate deployments — it updates the CloudFormation stack, injects
-          the API Gateway URL into <code>app.js</code>, uploads frontend files to S3, and
-          runs a CloudFront invalidation.
-        </p>
-        <p>
-          In practice, most day-to-day iteration still happened through the console. The
+          building hands-on understanding of each service's configuration options visually. The
           painful part was CloudFront cache invalidation — every frontend change required
           triggering a <code>/*</code> invalidation and waiting 60–90 seconds for it to
-          propagate. Doing that manually on every iteration became tedious quickly. The
-          deploy script addressed this, but a proper CI/CD pipeline (push to main → S3
+          propagate. Doing that manually on every iteration became tedious quickly. A proper CI/CD pipeline (push to main → S3
           sync → invalidation) would eliminate the manual step entirely.
         </p>
         <div style="padding-bottom: 3rem;"></div>

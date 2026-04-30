@@ -27,8 +27,8 @@
       <p class="page-header__eyebrow">AI Integration · Serverless · Web App</p>
       <h1 class="page-header__title">SUDOKOO</h1>
       <p class="page-header__subtitle">
-        AI-powered web app that photographs a Sudoku puzzle and turns it into an interactive
-        game — using Amazon Bedrock with Claude 3.5 Sonnet for computer vision extraction.
+        "SUDOKOO" is an AI-powered web app that photographs a Sudoku puzzle and turns it into an interactive
+        game — using Amazon Bedrock with Anthropic's Claude for computer vision capabilities.
       </p>
       <div class="tags" style="margin-top:1.25rem;">
         <span class="tag">Amazon Bedrock</span>
@@ -51,22 +51,22 @@
     <section style="padding-top:2.5rem;">
       <h2>The Problem</h2>
       <p>
-        My girlfriend had a Sudoku puzzle from a newspaper she'd kept for years. She wouldn't
-        let me write on it — she wanted to finish it herself. I wanted to digitalise it so
-        she could play it without marking the original. That very specific, very personal
-        problem became the starting point.
+        My girlfriend had a Sudoku puzzle from a newspaper clipping that she'd kept for years. She wouldn't
+        let me write on it because she wanted to finish it herself. I decided to digitalise it so
+        I could have a go at solving it. This very niche
+        problem became the starting point for this project.
       </p>
       <p>
-        Beyond solving the niche problem, the project was an opportunity to learn how to
+        Beyond solving my very unique problem, the project was an opportunity to learn how to
         integrate AI into a real application using AWS infrastructure — specifically
-        Amazon Bedrock for managed model access.
+        Amazon Bedrock.
       </p>
     </section>
 
     <section style="padding-top:2rem;">
       <h2>Architecture Overview</h2>
       <p>
-        The system is a serverless web application that uses a Lambda function to sends a base64-encoded image to Amazon Bedrock, which uses Anthropic's claude to extract and map the sudoku puzzle from the image and parse a structured response back to the application into create a playable puzzle digitally.
+        The system is a serverless web application that uses an API gateway and a Lambda function to send a base64-encoded image to Amazon Bedrock. Bedrock uses Claude to extract and map the sudoku puzzle from the image. The puzzle is verified as a solvable sudoku puzzle and the data is sent back to the application as a playable puzzle.
       </p>
       <pre>User (browser)
   │  HTTPS
@@ -94,7 +94,7 @@ Lambda (validates puzzle + runs backtracking solver)
   ▼
 Browser (renders interactive Sudoku game)</pre>
       <p>
-        The camera scan is one input mode. The app also includes a client-side puzzle
+        The camera scan is the main input mode. The app also includes a client-side puzzle
         generator — new games are generated in the browser with no API call required.
         The game engine (pencil marks, keyboard navigation, move validation, a timer,
         and conflict highlighting) runs entirely client-side and works independently
@@ -119,9 +119,12 @@ Browser (renders interactive Sudoku game)</pre>
       <div class="decision">
         <p class="decision__label">Decision · No VPC</p>
         <p>
-          <strong>Lambda in public mode.</strong> Lambda accesses Bedrock and S3 via AWS
-          internal service endpoints without a VPC. Adding VPC configuration would require
-          a NAT Gateway (~$45/month) with no security benefit for this workload.
+          <strong>Lambda runs without VPC attachment.</strong> This workload only needs to call
+          managed AWS services such as Bedrock and S3, so Lambda can use AWS-managed networking
+          and public regional service endpoints without subnets, route tables, NAT Gateway, or
+          VPC endpoints. Adding VPC configuration would increase complexity and may add cost
+          through NAT Gateway or PrivateLink endpoints, with little security benefit for this
+          workload unless the function needs access to private VPC resources.
         </p>
       </div>
 
@@ -141,9 +144,7 @@ Browser (renders interactive Sudoku game)</pre>
         <p>
           <strong>WAF deployed then removed.</strong> AWS WAF was initially configured for
           SQL injection, XSS, and DDoS protection. At $8/month for 3 active rules on a
-          single-user portfolio project, the cost was disproportionate. Removed — but the
-          configuration knowledge is there for production deployments where the cost is
-          justified.
+          single-user portfolio project, the cost was disproportionate.
         </p>
       </div>
     </section>
@@ -151,10 +152,10 @@ Browser (renders interactive Sudoku game)</pre>
     <section style="padding-top:2rem;">
       <h2>Honest Assessment</h2>
       <p>
-        The AI extraction works approximately 50% of the time. The two main failure modes are grid alignment errors (correct digits placed in adjacent cells) and character recognition errors (digits misread — most commonly 1 read as 7). Both produce an invalid puzzle — duplicate values in a row, column, or 3×3 box — and are caught by the built-in puzzle validation before loading into the game.
+        The AI extraction works approximately 50% of the time. It worked fine on the puzzle from my girlfriend's newspaper clipping, which was the main part. The two main failure modes are... grid alignment errors (correct digits placed in adjacent cells) and character recognition errors (digits misread — most commonly 1 read as 7). Both produce an invalid puzzle, but these are all caught by the built-in puzzle validation engine, and do not get loaded into the game.
       </p>
       <p>
-        For my portfolio use case, 50% is acceptable, i just wanted to learn how to integrate AI to solve this problem. For a production application, the approach would be different: Claude's structured JSON output mode would replace the current
+        For my portfolio use case, 50% is acceptable, I just wanted to learn how to integrate AI to solve this problem. For a production application, the approach would be different: Claude's structured JSON output mode would replace the current
         free-text parsing, and a validation pipeline would reject and re-request
         extractions below a confidence threshold.
       </p>
