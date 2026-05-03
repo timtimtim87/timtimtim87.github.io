@@ -115,6 +115,13 @@
             </tbody>
           </table>
         </div>
+        <p>
+          The /20 subnets provide 4,094 IP addresses for each subnet (taking away the 5 addresses
+          that AWS reserve). This is way more addresses than I will need, but there isn't really
+          any downside in this isolated project. A tighter design would use smaller CIDR blocks
+          based on the expected host count. In a shared enterprise VPC where IP address space is
+          a shared resource, I would size my subnets accordingly.
+        </p>
 
         <h3>Why Three Tiers?</h3>
         <p>
