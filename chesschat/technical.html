@@ -829,26 +829,59 @@ Room consumed — code is single-use</pre>
       <!-- ── Cost Model ─────────────────────────────────────── -->
       <section id="cost">
         <h2>Cost Model</h2>
+        <p>
+          The March bill came to <strong>$212.25</strong> (pre-tax) at near-zero actual usage.
+          Almost the entire cost is fixed always-on infrastructure — the variable components
+          (compute, data transfer, Chime) were negligible, whuhc makes sense as I was the onyl person using it.
+        </p>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Service</th><th>Monthly (portfolio phase)</th><th>Notes</th></tr></thead>
+            <thead><tr><th>Service</th><th>March actual</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td>NAT Gateway (1x)</td><td>~$35</td><td>Fixed + data transfer</td></tr>
-              <tr><td>ECS Fargate (1 task baseline — 0.25 vCPU, 512 MiB)</td><td>~$10</td><td>Scales with load</td></tr>
-              <tr><td>ALB</td><td>~$21</td><td>Fixed + LCU charges</td></tr>
-              <tr><td>ElastiCache Redis</td><td>~$22</td><td>1 primary + 1 replica, t4g.micro</td></tr>
-              <tr><td>VPC Interface Endpoints (4x)</td><td>~$28</td><td>Eliminates NAT data charges on AWS API calls</td></tr>
-              <tr><td>Chime SDK</td><td>~$10–40</td><td>Variable — $0.0017/attendee-min</td></tr>
-              <tr><td>DynamoDB (on-demand)</td><td>~$5</td><td>Scales with usage</td></tr>
-              <tr><td>CloudWatch, Route 53, misc</td><td>~$5</td><td></td></tr>
-              <tr><td><strong>Total</strong></td><td><strong>~$130–160</strong></td><td>Portfolio phase</td></tr>
+              <tr><td>VPC Interface Endpoints</td><td>$89.28</td><td>4 endpoints × 3 AZs = 12 endpoint-hours/hr — per-AZ pricing</td></tr>
+              <tr><td>NAT Gateway</td><td>$33.48</td><td>Hourly charge only — 0.025 GB data processed</td></tr>
+              <tr><td>ElastiCache Redis</td><td>$23.81</td><td>1 primary + 1 replica, t4g.micro</td></tr>
+              <tr><td>ALB</td><td>$16.71</td><td>Fixed hourly — negligible LCU usage</td></tr>
+              <tr><td>Domain registrar</td><td>$15.00</td><td>Annual fee</td></tr>
+              <tr><td>Public IPv4 addresses</td><td>$14.85</td><td>$0.005/hr per in-use address — AWS 2024 pricing change</td></tr>
+              <tr><td>ECS Fargate</td><td>$9.40</td><td>0.25 vCPU / 512 MiB baseline task</td></tr>
+              <tr><td>CloudWatch</td><td>$8.40</td><td>28 custom metrics at $0.30/metric</td></tr>
+              <tr><td>Other</td><td>$1.32</td><td>Secrets Manager, Route 53, ECR, Chime ($0.03)</td></tr>
+              <tr><td><strong>Total</strong></td><td><strong>$212.25</strong></td><td>Pre-tax</td></tr>
             </tbody>
           </table>
         </div>
+
+        <h3>The Always-On Problem</h3>
         <p>
-          The WebRTC + Coturn migration eliminates Chime SDK costs entirely, replacing them
-          with a flat ~$15–30/month EC2 instance. Break-even is approximately 150 hours/month
-          of active video.
+          At this scale, the bill exposes a structural issue: roughly $163 of the $212 is
+          fixed cost that runs regardless of whether anyone uses the platform. The NAT Gateway
+          processed 0.025 GB of data but cost $33. The VPC endpoints processed 1.67 GB but cost
+          $89. The ALB served negligible traffic but cost $17. This is the real cost of
+          production-grade infrastructure running at development load.
+        </p>
+        <p>
+          The biggest surprise was the VPC Interface Endpoints. Interface endpoints are billed
+          per-AZ — each endpoint deployed across three AZs counts as three hourly charges. Four
+          endpoints across three AZs produces 12 endpoint-hours per clock hour, not 4. At low
+          data volumes, this makes interface endpoints significantly more expensive than simply
+          routing through NAT. The free Gateway endpoints (S3 and DynamoDB) are unaffected by
+          this as they have no hourly charge.
+        </p>
+
+        <h3>At Scale, the Math Changes</h3>
+        <p>
+          The fixed costs stay flat while variable costs grow with usage. NAT data processing
+          charges ($0.045/GB) and Fargate compute scale with real load — at meaningful traffic,
+          the always-on baseline becomes a smaller fraction of total spend. The VPC endpoints
+          also start paying for themselves: routing ECR pulls and CloudWatch log writes through
+          endpoints rather than NAT avoids data processing charges that compound quickly at scale.
+          The architecture is correctly sized for production; it is just expensive to run at
+          near-zero load.
+        </p>
+        <p>
+          The WebRTC + Coturn migration eliminates Chime per-minute billing, replacing it with
+          a flat EC2 instance cost — the right trade once session volume is predictable.
         </p>
 
         <div style="padding-bottom: 3rem;"></div>
