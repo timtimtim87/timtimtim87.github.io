@@ -28,7 +28,7 @@
       <h1 class="page-header__title" style="font-size:clamp(1.6rem,4vw,2.25rem);">Infrastructure, IaC &amp; Data Design</h1>
       <p class="page-header__subtitle">
         VPC architecture, Terraform module structure, DynamoDB schema, data flow,
-        and security model — with the reasoning behind each decision.
+        and security.
       </p>
       <div style="margin-top:1rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
         <a href="index.html" class="btn btn--outline" style="font-size:0.82rem;">← Project overview</a>
@@ -79,10 +79,9 @@
       <section id="vpc">
         <h2>VPC Architecture</h2>
         <p>
-          The network is a three-tier VPC across three Availability Zones in
+          I built a three-tier VPC across three Availability Zones in
           <code>us-east-1</code> (CIDR <code>10.20.0.0/16</code>). Each tier has a distinct
-          trust level enforced by both route tables and security groups — defense in depth,
-          not reliance on a single control.
+          trust level enforced by both route tables and security groups.
         </p>
 
         <figure style="margin:1.5rem 0;">
@@ -119,34 +118,28 @@
 
         <h3>Why Three Tiers?</h3>
         <p>
-          A common simplification is two tiers (public + private). The third tier adds
-          explicit network-level enforcement that Redis is unreachable from anywhere except
-          the app tier. Security groups already enforce this, but route tables in the data
-          subnets have <em>no</em> <code>0.0.0.0/0</code> entry — there is no internet path
-          even if a security group rule were misconfigured. Two independent controls are
-          better than one.
+          It isolates my resources, which makes my application and infrastructure more secure. Security groups ensure only expected traffic is allowed at each layer. Route tables in the private tiers route 0.0.0.0/0 to a NAT Gateway rather than an Internet Gateway — NAT is outbound-only, so there is no inbound internet path to ECS tasks or Redis even if a security group rule were misconfigured.
         </p>
 
         <h3>NAT Gateway Strategy</h3>
         <p>
           A single NAT Gateway handles outbound internet from the private app subnets.
-          This introduces a single-AZ egress dependency — accepted for the portfolio phase.
+          This introduces a single-AZ egress dependency. If I intended to design my infrastructure with more resilience, I would have a NAT gateway in each AZ.
           The Terraform VPC module accepts <code>nat_gateway_mode = "single" | "per_az"</code>
-          so switching to per-AZ NAT (and the ~$32/month additional cost) requires one
-          variable change.
+          so switching to per-AZ NAT requires one
+          small change.
         </p>
       </section>
 
       <hr class="section-divider" />
-
-      <!-- ── Security Groups ───────────────────────────────── -->
-      <section id="security-groups">
-        <h2>Security Groups</h2>
-        <p>
-          Security groups enforce a strict one-directional trust chain. Each layer accepts
-          traffic only from the layer directly above it.
-        </p>
-        <pre>Internet (0.0.0.0/0)
+<!-- ── Security Groups ───────────────────────────────── -->
+<section id="security-groups">
+  <h2>Security Groups</h2>
+  <p>
+    Security groups enforce a strict one-directional trust chain. Each layer
+    only accepts traffic from the layer directly above it.
+  </p>
+  <pre>Internet (0.0.0.0/0)
   │  443 / 80
   ▼
 ALB Security Group
@@ -156,17 +149,14 @@ Fargate Task Security Group
   │  6379 (Redis)
   ▼
 Redis Security Group</pre>
-        <p>
-          The Redis security group source is the Fargate task security group ID, not a CIDR
-          block. This means any new Fargate task automatically inherits access when it joins
-          the security group, and no IP management is required as tasks scale.
-        </p>
-        <p>
-          A separate VPC Endpoint security group allows port 443 from the VPC CIDR
-          (<code>10.20.0.0/16</code>) to reach AWS service endpoints — ECR, CloudWatch Logs,
-          Secrets Manager.
-        </p>
-      </section>
+  <p>
+    The Redis rule references the Fargate task <strong>security group ID</strong>
+    rather than a CIDR block. Since Fargate tasks are ephemeral and get random
+    IPs, any new task automatically gets access just by being a member of that
+    security group — no IP management needed as tasks scale.
+  </p>
+
+</section>
 
       <hr class="section-divider" />
 
@@ -275,7 +265,7 @@ module "ecs_compute" {
         <pre># backend.tf
 terraform {
   backend "s3" {
-    bucket       = "chesschat-tfstate-723580627470-us-east-1"
+    bucket       = "chesschat-tfstate-xxxxxxxxxxxx-us-east-1"
     key          = "dev/terraform.tfstate"
     region       = "us-east-1"
     use_lockfile = true
@@ -294,7 +284,7 @@ terraform {
         <h2>CI/CD Pipeline</h2>
         <p>
           GitHub Actions handles continuous deployment. Authentication to AWS uses OIDC
-          (OpenID Connect) — no long-lived access keys are stored as GitHub secrets. Instead,
+          (OpenID Connect).
           GitHub's OIDC provider is trusted by an IAM role, and the workflow assumes that role
           for the duration of the pipeline run.
         </p>
@@ -315,6 +305,9 @@ terraform {
           quality checks run only in PR workflows and are enforced as required status checks on
           <code>main</code> — branch protection is configured with <code>enforce_admins = true</code>
           and <code>required_conversation_resolution = true</code>, with force-push and deletion disabled.
+          All of this branch protection configuration is managed as Infrastructure as Code using
+          Terraform's GitHub provider, so the repository settings are version-controlled and applied
+          consistently alongside the rest of the infrastructure.
         </p>
       </section>
 
@@ -326,21 +319,11 @@ terraform {
         <p>
           The platform uses two data stores with deliberately separate responsibilities.
           The guiding principle: <strong>Redis holds what is needed right now; DynamoDB
-          holds what needs to be remembered.</strong>
+          stores what needs to be remembered always.</strong> Active room metadata,
+          in-progress game state, and the WebSocket connection map all live in Redis with
+          TTLs — they expire naturally when the session ends. Completed game records,
+          user profiles and stats, and the social graph live in DynamoDB.
         </p>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Data</th><th>Store</th><th>Reason</th></tr></thead>
-            <tbody>
-              <tr><td>Active room metadata</td><td>Redis (TTL)</td><td>Ephemeral, fast access, irrelevant after session</td></tr>
-              <tr><td>In-progress game state</td><td>Redis (TTL)</td><td>Sub-ms read/write for move validation and clocks</td></tr>
-              <tr><td>WebSocket connection map</td><td>Redis</td><td>Shared across Fargate tasks for scalable routing</td></tr>
-              <tr><td>Completed game records</td><td>DynamoDB</td><td>Permanent, queryable by player and date</td></tr>
-              <tr><td>User profiles and stats</td><td>DynamoDB</td><td>Permanent, low write frequency</td></tr>
-              <tr><td>Social graph</td><td>DynamoDB</td><td>Permanent, structured relationships</td></tr>
-            </tbody>
-          </table>
-        </div>
         <p>
           Importantly, DynamoDB receives exactly <strong>one write per completed game</strong>,
           regardless of how many moves were played. All mid-game state lives in Redis.
@@ -355,9 +338,9 @@ terraform {
         <h2>DynamoDB Schema</h2>
         <p>
           The schema uses a <strong>multi-table design</strong> — one table per domain —
-          rather than the popular single-table pattern. IAM permissions, CloudWatch metrics,
+          rather than a single-table pattern. IAM permissions, CloudWatch metrics,
           and PITR settings are all cleaner per-table. The social domain was also added after
-          initial design; retrofitting single-table key namespacing would have been disruptive.
+          initial design; retrofitting single-table key namespacing would have been challenging, so this choice provided me with a level of freedom that I wouldn't have with a single table design. To stay as honest as possible, Claude helped design the schema based on my application requirements.
         </p>
 
         <h3>Users</h3>
@@ -437,7 +420,7 @@ terraform {
           <strong>Why two GSIs?</strong> A player alternates colours across games.
           To query their full history you need games where they were white AND games where
           they were black. DynamoDB GSI partition keys map to a single attribute — two
-          GSIs with two parallel queries (merged in the application) is the idiomatic
+          GSIs with two parallel queries (merged in the application) is a
           solution. A single GSI cannot serve both lookup directions.
         </div>
 
@@ -598,6 +581,12 @@ game_finalization_deadletter  List — jobs that failed after 5 attempts</pre>
           connection is gone. This is more robust than relying solely on Redis key TTL, which
           fires no callback on expiry.
         </p>
+        <p>
+          The finalization queue is a Redis List used as a lightweight job queue: completed game
+          data waits there until it can be written to DynamoDB. If DynamoDB is momentarily
+          unavailable, the job sits in the queue rather than being lost. Jobs that fail five times
+          are parked in the dead letter list for inspection rather than retried indefinitely.
+        </p>
       </section>
 
       <hr class="section-divider" />
@@ -646,10 +635,7 @@ game_finalization_deadletter  List — jobs that failed after 5 attempts</pre>
       <!-- ── Session Lifecycle ─────────────────────────────── -->
       <section id="session-lifecycle">
         <h2>Session Lifecycle</h2>
-        <p>
-          Rooms follow video-call semantics. The lifecycle is deterministic with no
-          ambiguous intermediate states.
-        </p>
+        
         <pre>Room created (User A)
   │  status: waiting
   ▼
@@ -783,6 +769,12 @@ Room consumed — code is single-use</pre>
       <section id="observability">
         <h2>Observability</h2>
         <h3>Infrastructure Alarms</h3>
+        <p>
+          All alarms are CloudWatch Alarms, configured in Terraform's <code>monitoring/</code>
+          module and routed to an SNS topic for email notification. They cover the four
+          infrastructure components that could silently degrade the platform — compute,
+          load balancing, the database, and cost.
+        </p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Metric</th><th>Threshold</th><th>Window</th></tr></thead>
@@ -818,18 +810,17 @@ Room consumed — code is single-use</pre>
 
         <h3>Logging</h3>
         <p>
-          Application logs write to CloudWatch Logs via the <code>awslogs</code> driver in
-          the ECS task definition. Log group <code>/ecs/chesschat/application</code>,
-          30-day retention. VPC Flow Logs write all traffic to a separate log group,
-          30-day retention.
+          Application logs are written to CloudWatch Logs (<code>/ecs/chesschat/application</code>)
+          with 30-day retention. VPC Flow Logs capture all network traffic in a separate log group
+          with the same retention.
         </p>
         <p>
-          Every HTTP request receives an <code>x-correlation-id</code> header in the response
-          (either the client-supplied value, or a generated UUID). The ID is logged alongside
-          method, path, status, and latency in the structured access log. WebSocket sessions
-          log a <code>sessionId</code> and <code>connectionId</code> for the same purpose.
-          The triage runbook uses correlation IDs as the primary drill-down path: start from
-          a CloudWatch alarm, find the log entries by correlation ID, trace the request end to end.
+          Every HTTP request is assigned an <code>x-correlation-id</code> — either the
+          client-supplied value or a generated UUID — which is logged alongside method, path,
+          status, and latency. WebSocket sessions are traced the same way using a
+          <code>sessionId</code> and <code>connectionId</code>. When an alarm fires, the
+          correlation ID is the starting point: find the matching log entries and trace the
+          request end to end.
         </p>
       </section>
 

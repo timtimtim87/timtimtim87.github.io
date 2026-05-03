@@ -55,9 +55,8 @@
       <p>
         The gameplay model follows <strong>video-call session semantics</strong>: both players
         enter a video room that persists for the session, playing as many sequential chess games
-        as they want within the 1-hour room window — each game uses a 5-minute per-player chess clock. Video chat
-        never interrupts between games. When both players leave, the room tears down
-        immediately — no stale active rooms accumulating AWS Chime costs.
+        as they want within the 1-hour room window. Each game uses a 5-minute per-player chess clock. When both players leave, the room tears down
+        automatically — no stale active rooms accumulating AWS Chime costs.
       </p>
     </section>
 
@@ -65,7 +64,7 @@
       <p>
         The app requires a range of functionality, and below is an image showing the logic
         flow of different areas of the application. I'm still learning how best to create
-        diagrams, but separating each flow felt like an easier-to-read reference.
+        diagrams, but separating each flow felt like an easier-to-read reference. In the future, I would have each flow diagram separately as the quality of this large image is low.
       </p>
     </section>
 
@@ -81,9 +80,6 @@
         sections below and in the <a href="technical.html">technical deep-dive</a>.
       </p>
       <p>
-        The app is currently live but I'll be taking it down soon to save on running costs.
-        It may come back in a later phase with the planned WebRTC migration and remaining social
-        features completed.
       </p>
       <video
         controls
@@ -145,8 +141,7 @@ Static landing / auth       Authenticated gameplay runtime
 
       <h3>Single NAT Gateway</h3>
       <p>
-        The VPC spans three AZs but egress routes through one NAT Gateway — saving ~$32/month
-        at the cost of a single-AZ egress dependency. The Terraform VPC module accepts a
+        The VPC spans three AZs but outbound traffic routes through one NAT Gateway. So, if that AZ goes down, I have no other pathways for outbound traffic. This does save money though, a NAT gateway is about $35 per month. The Terraform VPC module accepts a
         <code>nat_gateway_mode</code> variable, so switching to per-AZ NAT is a one-variable
         change, not a network redesign.
       </p>
@@ -154,31 +149,27 @@ Static landing / auth       Authenticated gameplay runtime
       <h3>Video Chat Room Lifecycle</h3>
       <p>
         Rooms exist only during live participation. A 12-second reconnect grace handles
-        accidental disconnects without triggering teardown. No rematch or room reuse — players
-        start a new room each time. This eliminates stale-state risk and keeps video
-        infrastructure costs predictable.
+        accidental disconnects without triggering teardown. Both participants need to join the "video chat" for Chime to actually start the video chat. Unique room codes exist for all friend pairs, meaning that the room codes are not randomly assigned per room creation, but are locked to the pair of players that played against each other, and will be re-used, when they chose to play again.
       </p>
 
       <h3>Redis + DynamoDB Split</h3>
       <p>
-        Active room and game state lives in Redis with TTL expiry. DynamoDB receives exactly
-        one write per completed game, regardless of how many moves were played. Write costs
-        scale with games completed, not game activity.
+        Active room and game state is real time data, and therefore lives in Redis. After a game has been played, the cached game data is written to DynamoDB. DynamoDB receives exactly
+        one write per completed game, regardless of how many moves were played.
       </p>
 
       <h3>Chime SDK → WebRTC Migration</h3>
       <p>
-        Chime SDK provided a fast path to working video. The planned migration to native
+        Chime SDK provided a fast path to working video. Plus, I wanted to learn more about this AWS service. The planned migration to native
         browser WebRTC with a self-hosted Coturn server eliminates per-minute billing in favour
-        of flat EC2 cost. All sessions are 1-on-1 so an SFU is never needed; only ~15% require
-        TURN relay.
+        of consistent EC2 compute costs.
       </p>
     </section>
 
     <section style="padding-top:2rem;">
       <h2>How It Was Built</h2>
       <p>
-        The build followed infrastructure-first order — each layer unblocking the next. The
+        The build was designed in a way that that made sense, because some services rely on other services existing already. Basically, each build layer unlocks the next set of services to build. The
         VPC and networking had to exist before any compute could be placed inside it. ECS and
         the container environment came next, since the application itself runs there. The chess
         engine and game logic were built on top of that working compute layer, and the video
@@ -192,27 +183,27 @@ Static landing / auth       Authenticated gameplay runtime
 
       <div class="decision">
         <p class="decision__label">2 · Data Layer</p>
-        <p>DynamoDB tables for users, games, and the social graph. ElastiCache Redis cluster with multi-AZ replication and Secrets Manager auth token. Schema designed upfront to avoid migration pain later.</p>
+        <p>DynamoDB tables for users, games, and the social graph. ElastiCache Redis cluster with multi-AZ replication.</p>
       </div>
 
       <div class="decision">
         <p class="decision__label">3 · Auth</p>
-        <p>Cognito user pool with email/password and Google OAuth. The auth surface (chess-chat.com) is a custom single-page app written in vanilla JS — no framework, no build step — handling login, signup, email verification, forgot password, OAuth callback, and session handoff. JWT tokens used for both REST and WebSocket authentication.</p>
+        <p>Cognito user pool with email/password and Google OAuth. The auth surface (chess-chat.com) is a custom single-page website. It handles login & signup, email verification, forgot password, OAuth callback, and session handoff. JWT tokens used for both REST and WebSocket authentication.</p>
       </div>
 
       <div class="decision">
         <p class="decision__label">4 · Compute &amp; Delivery</p>
-        <p>ECS Fargate service behind an ALB with HTTPS. CloudFront + S3 for the static marketing and auth site. Route 53 for DNS, ACM for certificates on both distributions.</p>
+        <p>ECS Fargate service behind an ALB. CloudFront + S3 for the static marketing and auth site. Route 53 for DNS.</p>
       </div>
 
       <div class="decision">
         <p class="decision__label">5 · CI/CD</p>
-        <p>GitHub Actions pipeline with OIDC authentication to AWS — no stored access keys. A single deploy pipeline on push to main: ECR image tagged by commit SHA, ECS rolling deploy, then static auth assets synced to S3 with CloudFront invalidation. Tests (backend, frontend, Terraform) run as required PR gate checks — not in the deploy pipeline. Branch protection enforces all three checks on main with no admin bypass.</p>
+        <p>GitHub Actions pipeline. A single deploy pipeline on push to main: ECR image tagged by commit SHA, ECS rolling deploy, then static auth assets synced to S3 with CloudFront invalidation. Tests (backend, frontend, Terraform) run as required PR gate checks — not in the deploy pipeline. Branch protection enforces all three checks on main with no admin bypass.</p>
       </div>
 
       <div class="decision">
         <p class="decision__label">6 · Chess Engine</p>
-        <p>WebSocket server handling room creation, game state, and real-time move broadcast. Client-side validation with chess.js for immediate UX feedback; server-side validation with chess.js as the authoritative source of truth (prevents cheating even though both sides use the same library). The game protocol covers moves, resignation, takeback requests, and a single-pending draw offer flow. 8 sound cues are mapped to game events (move, capture, castle, promotion, check, win, draw, error) using CC0 audio assets with zero library dependencies; the server includes audio metadata (<code>moveType</code>, <code>isCheck</code>) in the <code>move_made</code> event so the server drives the sound trigger type.</p>
+        <p>WebSocket server handling room creation, game state, and real-time move broadcast. Client-side validation with chess.js; server-side validation with chess.js as the authoritative source of truth.</p>
       </div>
 
       <div class="decision">
@@ -220,10 +211,6 @@ Static landing / auth       Authenticated gameplay runtime
         <p>Chime SDK integration for managed WebRTC. The server creates a meeting on room activation and issues attendee tokens to both players. Video runs independently of the chess session — a disconnect from one does not affect the other.</p>
       </div>
 
-      <div class="decision">
-        <p class="decision__label">8 · Social Layer</p>
-        <p>Friends, challenges, game history with full move-by-move replay, and notifications. The DynamoDB schema, backend endpoints, and frontend pages (including a full game replay viewer) are built and wired to live data. A Chess.com account linking feature is also implemented: linking a verified Chess.com account enables a username displacement mechanic — a verified holder can claim a username currently held by an unverified user — and adds a verified badge. Tim approached Chess.com directly for API access for this use case; access was declined. Challenge-to-game flow polish remains in progress.</p>
-      </div>
     </section>
 
     <section style="padding: 2.5rem 0 4rem;">
