@@ -189,12 +189,11 @@ Redis Security Group</pre>
           </table>
         </div>
         <p>
-          VPC endpoints can reduce NAT Gateway usage for AWS service traffic such as ECR
+          VPC endpoints could reduce NAT Gateway usage for AWS service traffic such as ECR
           pulls, CloudWatch Logs, Secrets Manager, S3, and DynamoDB. Gateway endpoints for
-          S3 and DynamoDB are free and often a clear win. Interface endpoints improve private
-          connectivity and may reduce NAT data processing costs, but they have their own
+          S3 and DynamoDB are free, but other interface endpoints have their own
           hourly and per-GB costs — so whether they save money depends on AZ count, endpoint
-          count, and actual traffic volume.
+          count, and actual traffic volume. More on this in my cost breakdown.
         </p>
       </section>
 
@@ -327,9 +326,9 @@ terraform {
           The platform uses two data stores with deliberately separate responsibilities.
           The guiding principle: <strong>Redis holds what is needed right now; DynamoDB
           stores what needs to be remembered always.</strong> Active room metadata,
-          in-progress game state, and the WebSocket connection map all live in Redis with
-          TTLs — they expire naturally when the session ends. Completed game records,
-          user profiles and stats, and the social graph live in DynamoDB.
+          in-progress game state, and the WebSocket connection map all live in Redis,
+           they expire naturally when the session ends. Completed game records,
+          user profiles and stats, and the friends connections live in DynamoDB.
         </p>
         <p>
           Importantly, DynamoDB receives exactly <strong>one write per completed game</strong>,
@@ -379,8 +378,8 @@ terraform {
         </div>
         <div class="callout">
           <strong>Why <code>user_id</code> as PK, not <code>username</code>?</strong>
-          Usernames can change. The chess.com OAuth integration includes a displacement mechanic
-          where a verified chess.com holder can claim a username held by an unverified user.
+          Usernames can change. I wanted to implement a feature that utilsed chess.com OAuth integration, which would include a displacement mechanic
+          where a verified chess.com holder can claim a username held by an unverified user. However, this didn't eventuate.
           Using an immutable Cognito sub means a username change is a single
           <code>UpdateItem</code>, not a data migration.
         </div>
