@@ -284,7 +284,6 @@
     <section style="padding-top:2rem;">
       <h2>Where This Design Breaks Down</h2>
       <ul>
-        <li><strong>Coaches are fully independent.</strong> Multiple coaches can have accounts and data is scoped per coach, but there are no organisations, roles, or client sharing between coaches. Supporting a gym or a coaching team would mean real tenancy work, plus proper error alerting instead of reading Vercel logs.</li>
         <li><strong>Storing answers as jsonb makes them harder to query.</strong> Question changes need no migration, but cross-client analytics ("average sleep rating across all clients") means walking json in SQL. If the practice grows, the frequently queried fields would need to be promoted to columns.</li>
         <li><strong>No automated alerting on AI degradation.</strong> A failed agent degrades gracefully and visibly in the report, but nothing pages me. Fine while I open every report myself; not fine with volume.</li>
       </ul>
@@ -299,15 +298,6 @@
           constraint when a new value was added to an enum-like column, and the insert
           failed only at runtime. The fix was a manual ALTER in the database.
           Constraint changes now get verified against the live schema.
-        </li>
-        <li>
-          <strong>Design the intake as self-ratings from the start.</strong> Version one
-          inferred habit quality from dozens of behavioural questions and a rules engine
-          comparing clients to goal personas. It worked, but clients know where they
-          stand: asking them to rate themselves 1 to 10 with a note produced a shorter
-          form and a more honest report, and most of the inference engine was deleted.
-          The more complex system was more interesting to build, but the simpler one
-          produced better results.
         </li>
       </ul>
     </section>
