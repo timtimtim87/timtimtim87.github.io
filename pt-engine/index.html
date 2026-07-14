@@ -176,6 +176,19 @@
       </div>
 
       <div class="decision">
+        <p class="decision__label">Decision · Multi-coach data model</p>
+        <p>
+          <strong>Although built for my own practice, the system supports multiple
+          coaches from the start.</strong> Any coach can sign up for their own
+          account and gets their own client list, intake forms, and stored reports,
+          scoped entirely to them. I did this in case I ever want to offer the
+          system to other coaches — retrofitting per-coach data scoping later would
+          have meant reworking every table and query, so it was cheaper to build it
+          in from day one.
+        </p>
+      </div>
+
+      <div class="decision">
         <p class="decision__label">Decision · Delivering the intake form</p>
         <p>
           <strong>The intake form is opened in the session rather than emailed.</strong>
@@ -271,7 +284,7 @@
     <section style="padding-top:2rem;">
       <h2>Where This Design Breaks Down</h2>
       <ul>
-        <li><strong>It assumes one coach.</strong> Data is scoped per coach, but there are no organisations, roles, or client sharing. Opening this to other coaches means real tenancy work, plus proper error alerting instead of reading Vercel logs.</li>
+        <li><strong>Coaches are fully independent.</strong> Multiple coaches can have accounts and data is scoped per coach, but there are no organisations, roles, or client sharing between coaches. Supporting a gym or a coaching team would mean real tenancy work, plus proper error alerting instead of reading Vercel logs.</li>
         <li><strong>Storing answers as jsonb makes them harder to query.</strong> Question changes need no migration, but cross-client analytics ("average sleep rating across all clients") means walking json in SQL. If the practice grows, the frequently queried fields would need to be promoted to columns.</li>
         <li><strong>No automated alerting on AI degradation.</strong> A failed agent degrades gracefully and visibly in the report, but nothing pages me. Fine while I open every report myself; not fine with volume.</li>
       </ul>
