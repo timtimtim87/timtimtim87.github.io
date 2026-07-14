@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PT-Engine · Tim Hewitt</title>
+  <meta name="description" content="PT-Engine: client onboarding and reporting system for a personal-training practice, built on Next.js, Vercel and Neon." />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+
+  <nav class="site-nav">
+    <div class="site-nav__inner">
+      <a href="/" class="site-nav__logo">tim hewitt</a>
+      <ul class="site-nav__links">
+        <li><a href="/#projects">Projects</a></li>
+        <li><a href="/#about">About</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn ↗</a></li>
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="container">
+
+    <header class="page-header">
+      <p class="page-header__eyebrow">Full-Stack Product · Client Onboarding System</p>
+      <h1 class="page-header__title">PT-Engine</h1>
+      <p class="page-header__subtitle">
+        Client onboarding and reporting engine for my personal-training practice.
+        A new client fills in one form; the coach gets a structured, AI-assisted
+        report before the first session.
+      </p>
+      <div class="tags" style="margin-top:1.25rem;">
+        <span class="tag">Next.js 16</span>
+        <span class="tag">Vercel</span>
+        <span class="tag">Neon Postgres</span>
+        <span class="tag">Drizzle ORM</span>
+        <span class="tag">Clerk</span>
+        <span class="tag">Claude API</span>
+        <span class="tag">Resend</span>
+        <span class="tag">TypeScript</span>
+      </div>
+      <div style="margin-top:1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+        <a href="https://pt-engine.vercel.app" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">Live site ↗</a>
+        <a href="https://github.com/timtimtim87/PT-Engine" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+    </header>
+
+    <section style="padding-top:2.5rem;">
+      <h2>The Problem</h2>
+      <p>
+        Onboarding a new coaching client is the most information-dense moment of the
+        relationship, and traditionally the most wasteful. The first session gets eaten
+        by an intake conversation, the answers live in the coach's head or in scattered
+        notes, and the quality of the first program depends on how good that one
+        conversation happened to be. It doesn't scale past a handful of clients, and
+        nothing about it is repeatable.
+      </p>
+      <p>
+        I wanted every new client to arrive at their first session already understood:
+        goals, injuries, medical history, eating patterns, sleep, stress, and an honest
+        self-assessment of their current habits, all captured before we ever meet, and
+        turned into a report both of us can work from.
+      </p>
+      <p>
+        The second requirement was operational: this is a working tool for a real
+        business run by one person. Hosting had to be simple, reliable, and close to
+        free, with no servers to patch and nothing to babysit.
+      </p>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>What It Does</h2>
+      <p>
+        The coach logs in, adds a client, and sends them a magic link. The client fills
+        in a two-sheet intake with no account and no password: one sheet of specifics
+        (goals, injuries, medical history, what they actually eat, training and life
+        logistics) and one sheet of 1-to-10 self-ratings across nutrition, sleep,
+        stress, and movement, each with an optional one-line note in their own words.
+        On submit, the engine scores the ratings deterministically, two AI agents
+        interpret the free text, and a structured report is stored and rendered for
+        the coach. After onboarding, each client gets one reusable weekly check-in
+        link, and a third agent writes a coach-only trend read on every submission.
+      </p>
+
+      <div class="table-wrap" style="margin-top:1.5rem;">
+        <table>
+          <thead><tr><th>Outcome</th></tr></thead>
+          <tbody>
+            <tr><td>Client onboarding runs without the coach present, from a single link</td></tr>
+            <tr><td>Coach-ready report generated within a minute of the client submitting</td></tr>
+            <tr><td>Every report readable in two voices: coach (clinical, third person) and client (second person)</td></tr>
+            <tr><td>Weekly check-ins on one reusable link per client, with an AI trend narrative</td></tr>
+            <tr><td>Every AI call logged with prompt version, tokens, cost estimate and request id</td></tr>
+            <tr><td>Hosting and database run in managed free tiers; AI costs are cents per client</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>The Onboarding Flow</h2>
+      <p>
+        The whole product is one loop. The interesting architecture is not the hosting,
+        it's how the work is split between deterministic code and AI.
+      </p>
+      <pre>Coach dashboard                    Client (no account)
+(Clerk-protected)                  (magic link, single-use)
+      │                                   │
+  add client ──── intake link ───────────►│
+      │                                   │
+      │                        two-sheet intake form
+      │                        (specifics + self-ratings)
+      │                                   │
+      │                                   ▼
+      │                          POST /api/intake/submit
+      │                                   │
+      │              ┌────────────────────┼────────────────────┐
+      │              ▼                    ▼                    ▼
+      │      deterministic         nutrition agent      report agent
+      │      ratings engine        (what the client     (narratives, plan,
+      │      (scores, focus,        says they eat)       readiness read)
+      │       gap detection)              │                    │
+      │              └────────────────────┴────────────────────┘
+      │                                   │
+      ◄──────────── stored report ────────┘
+      │
+  report viewer (coach / client voice) ── weekly check-in loop</pre>
+      <p>
+        Anything with a number in it is deterministic TypeScript: the rating scores,
+        the focus-habit selection, the fat-loss timeline calculator, the
+        self-awareness gap checks. The AI agents only ever interpret free text and
+        write prose. They are never asked to invent a number, and the prompt forbids
+        re-rating what the client already rated themselves.
+      </p>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>Key Design Decisions</h2>
+
+      <div class="decision">
+        <p class="decision__label">Decision · Hosting</p>
+        <p>
+          <strong>Managed platform over self-built infrastructure.</strong> My other
+          projects run on hand-built AWS: VPCs, ECS, Terraform. This one deliberately
+          doesn't. Vercel hosts the Next.js app, Neon provides serverless Postgres in
+          the Sydney region, Clerk handles coach auth, Resend sends the emails. Deploys
+          are a git push, preview environments are free, and there is no instance
+          anywhere that can fill a disk or miss a patch. For a one-person business
+          tool, operational simplicity is the architecture. The tradeoff is platform
+          lock-in, which I judged acceptable because every piece (Postgres, React,
+          transactional email) is portable in substance even if the wiring is not.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Decision · Client access</p>
+        <p>
+          <strong>Clients never get accounts.</strong> Asking a new coaching client to
+          create a login before they've had a single session is friction in the worst
+          possible place. Clients only ever touch tokenised public links. Intake links
+          are single-use and expire after 14 days. Check-in links are deliberately the
+          opposite: one reusable link per client that lives in their bookmarks, with
+          revocation instead of expiry and a 20-hour double-submit guard. Two different
+          token models for two different behaviours, each implemented as its own small
+          validator rather than one generic system.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Decision · AI boundaries</p>
+        <p>
+          <strong>Deterministic core, AI at the edges, independent failure.</strong>
+          Each AI agent has one job and a typed tool schema: one estimates nutrition
+          from the client's own food descriptions, one writes the report narratives,
+          one reads weekly check-ins in context. Each call is wrapped so it can never
+          throw away an intake: if an agent fails, the report still renders from the
+          deterministic output with a visible "rules-based only" notice, and the
+          failure is logged. The client's data is written before any AI runs.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Decision · Questions as content, not code</p>
+        <p>
+          <strong>The question banks are markdown files.</strong> The 25 habit
+          questions and 51 state questions live in two markdown files with stable keys,
+          rubrics, and tags. The form, the engine, and the report all parse them at
+          runtime. As the coach, I can reword a question, retire one, or add one
+          without touching application code, and intake answers are stored as jsonb so
+          question changes never need a migration. Retired questions keep labelling old
+          answers instead of orphaning them.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Decision · Observability of the AI</p>
+        <p>
+          <strong>Every AI call attempt writes a log row.</strong> Status, the exact
+          prompt sent, raw tool output, token counts, duration, prompt version, and the
+          provider request id. A coach-facing log viewer sits behind every report with
+          a per-call cost estimate. When a report reads oddly, I can see precisely what
+          the model was told and what it returned, and prompt versions make regressions
+          diffable. This turned prompt iteration from guesswork into review.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Decision · One report, two voices</p>
+        <p>
+          <strong>The report is authored in a coach voice and a client voice.</strong>
+          The coach view is clinical third person and includes coach-only material
+          (readiness assessment, self-awareness gaps where a client's self-rating
+          contradicts their own numbers). The client view is second person and
+          motivational, with those sections hidden. Both voices are produced in the
+          same generation pass and stored on the same report, so they can never drift
+          out of sync.
+        </p>
+      </div>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>Where This Design Breaks Down</h2>
+      <ul>
+        <li><strong>It assumes one coach.</strong> Data is scoped per coach, but there are no organisations, roles, or client sharing. Opening this to other coaches means real tenancy work, plus proper error alerting instead of reading Vercel logs.</li>
+        <li><strong>jsonb answers trade queryability for flexibility.</strong> Question changes are free, but cross-client analytics ("average sleep rating across all clients") means walking json in SQL. If the practice grows, the hot fields get promoted to columns.</li>
+        <li><strong>No automated alerting on AI degradation.</strong> A failed agent degrades gracefully and visibly in the report, but nothing pages me. Fine while I open every report myself; not fine with volume.</li>
+      </ul>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>What I'd Do Differently</h2>
+      <ul>
+        <li>
+          <strong>Test the email path on day one.</strong> Magic links shipped with a
+          copy-to-clipboard fallback, so actual email delivery through Resend went
+          unexercised for weeks. The fallback was so convenient it hid the untested path.
+        </li>
+        <li>
+          <strong>Trust the schema tool less on constraints.</strong> Drizzle's push
+          silently skipped widening a CHECK constraint when a new value was added to an
+          enum-like column, and the insert failed only at runtime. The fix was a manual
+          ALTER in the database. Constraint changes now get verified against the live
+          schema, not assumed from the ORM.
+        </li>
+        <li>
+          <strong>Design the intake as self-ratings from the start.</strong> Version one
+          inferred habit quality from dozens of behavioural questions and a rules engine
+          comparing clients to goal personas. It worked, but clients know where they
+          stand: asking them to rate themselves 1 to 10 with a note produced a shorter
+          form and a more honest report, and most of the inference engine was deleted.
+          The lesson is old but real: the clever system I enjoyed building was not the
+          simple system the product needed.
+        </li>
+      </ul>
+    </section>
+
+    <section style="padding: 2.5rem 0 4rem;">
+      <hr class="section-divider" />
+      <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+        <a href="https://pt-engine.vercel.app" class="btn btn--primary" target="_blank" rel="noopener">Live site ↗</a>
+        <a href="https://github.com/timtimtim87/PT-Engine" class="btn btn--outline" target="_blank" rel="noopener">View on GitHub ↗</a>
+        <a href="/" class="btn btn--outline">← All projects</a>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <p>© 2026 Tim Hewitt</p>
+      <ul class="site-footer__links">
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn</a></li>
+        <li><a href="mailto:tim.antibes@gmail.com">Email</a></li>
+      </ul>
+    </div>
+  </footer>
+
+</body>
+</html>
