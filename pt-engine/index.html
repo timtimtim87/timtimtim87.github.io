@@ -27,9 +27,10 @@
       <p class="page-header__eyebrow">Full-Stack Product · Client Onboarding System</p>
       <h1 class="page-header__title">PT-Engine</h1>
       <p class="page-header__subtitle">
-        Client onboarding and reporting engine for my personal-training practice.
-        A new client fills in one form; the coach gets a structured, AI-assisted
-        report before the first session.
+        Client onboarding and reporting system for my personal-training practice.
+        New clients complete an intake form before their first session, and the
+        system generates a structured report for the coach, with sections written
+        by AI agents.
       </p>
       <div class="tags" style="margin-top:1.25rem;">
         <span class="tag">Next.js 16</span>
@@ -50,23 +51,22 @@
     <section style="padding-top:2.5rem;">
       <h2>The Problem</h2>
       <p>
-        Onboarding a new coaching client is the most information-dense moment of the
-        relationship, and traditionally the most wasteful. The first session gets eaten
-        by an intake conversation, the answers live in the coach's head or in scattered
-        notes, and the quality of the first program depends on how good that one
-        conversation happened to be. It doesn't scale past a handful of clients, and
-        nothing about it is repeatable.
+        The intake conversation with a new coaching client normally takes up most of
+        the first session. The answers end up in the coach's head or in scattered
+        notes, and the quality of the first program depends on how thorough that one
+        conversation was. This doesn't scale past a handful of clients, and it isn't
+        repeatable.
       </p>
       <p>
-        I wanted every new client to arrive at their first session already understood:
-        goals, injuries, medical history, eating patterns, sleep, stress, and an honest
-        self-assessment of their current habits, all captured before we ever meet, and
-        turned into a report both of us can work from.
+        I wanted the intake information — goals, injuries, medical history, eating
+        patterns, sleep, stress, and a self-assessment of current habits — collected
+        before the first session and turned into a report that both the coach and the
+        client can work from.
       </p>
       <p>
         The second requirement was operational: this is a working tool for a real
         business run by one person. Hosting had to be simple, reliable, and close to
-        free, with no servers to patch and nothing to babysit.
+        free, with no servers to patch and no infrastructure to maintain.
       </p>
     </section>
 
@@ -90,7 +90,7 @@
           <tbody>
             <tr><td>Client onboarding runs without the coach present, from a single link</td></tr>
             <tr><td>Coach-ready report generated within a minute of the client submitting</td></tr>
-            <tr><td>Every report readable in two voices: coach (clinical, third person) and client (second person)</td></tr>
+            <tr><td>Each report generated in two versions: one for the coach (clinical, third person) and one for the client (second person)</td></tr>
             <tr><td>Weekly check-ins on one reusable link per client, with an AI trend narrative</td></tr>
             <tr><td>Every AI call logged with prompt version, tokens, cost estimate and request id</td></tr>
             <tr><td>Hosting and database run in managed free tiers; AI costs are cents per client</td></tr>
@@ -102,8 +102,9 @@
     <section style="padding-top:2rem;">
       <h2>The Onboarding Flow</h2>
       <p>
-        The whole product is one loop. The interesting architecture is not the hosting,
-        it's how the work is split between deterministic code and AI.
+        The main architectural decision was how to divide the work between
+        deterministic code and AI. The diagram below shows the onboarding flow and
+        where each sits.
       </p>
       <pre>Coach dashboard                    Client (no account)
 (Clerk-protected)                  (magic link, single-use)
@@ -128,11 +129,11 @@
       │
   report viewer (coach / client voice) ── weekly check-in loop</pre>
       <p>
-        Anything with a number in it is deterministic TypeScript: the rating scores,
+        All numeric output is produced by deterministic TypeScript: the rating scores,
         the focus-habit selection, the fat-loss timeline calculator, the
-        self-awareness gap checks. The AI agents only ever interpret free text and
-        write prose. They are never asked to invent a number, and the prompt forbids
-        re-rating what the client already rated themselves.
+        self-awareness gap checks. The AI agents only interpret free text and write
+        prose. They are not used to produce numbers, and the prompt instructs them
+        not to re-rate anything the client has already rated themselves.
       </p>
     </section>
 
@@ -147,19 +148,21 @@
           doesn't. Vercel hosts the Next.js app, Neon provides serverless Postgres in
           the Sydney region, Clerk handles coach auth, Resend sends the emails. Deploys
           are a git push, preview environments are free, and there is no instance
-          anywhere that can fill a disk or miss a patch. For a one-person business
-          tool, operational simplicity is the architecture. The tradeoff is platform
-          lock-in, which I judged acceptable because every piece (Postgres, React,
-          transactional email) is portable in substance even if the wiring is not.
+          anywhere that can fill a disk or miss a patch. For a tool supporting a
+          one-person business, low operational overhead was the most important
+          requirement. The tradeoff is platform lock-in, which I judged acceptable
+          because every piece (Postgres, React, transactional email) is portable in
+          substance even if the wiring is not.
         </p>
       </div>
 
       <div class="decision">
         <p class="decision__label">Decision · Client access</p>
         <p>
-          <strong>Clients never get accounts.</strong> Asking a new coaching client to
-          create a login before they've had a single session is friction in the worst
-          possible place. Clients only ever touch tokenised public links. Intake links
+          <strong>Clients don't have accounts.</strong> Asking a new coaching client to
+          create a login before they've had a single session adds friction at the point
+          where they are most likely to drop off, so clients only ever use tokenised
+          public links. Intake links
           are single-use and expire after 14 days. Check-in links are deliberately the
           opposite: one reusable link per client that lives in their bookmarks, with
           revocation instead of expiry and a 20-hour double-submit guard. Two different
@@ -171,7 +174,8 @@
       <div class="decision">
         <p class="decision__label">Decision · AI boundaries</p>
         <p>
-          <strong>Deterministic core, AI at the edges, independent failure.</strong>
+          <strong>AI is limited to interpreting free text, and each agent can fail
+          without affecting the rest of the system.</strong>
           Each AI agent has one job and a typed tool schema: one estimates nutrition
           from the client's own food descriptions, one writes the report narratives,
           one reads weekly check-ins in context. Each call is wrapped so it can never
@@ -182,9 +186,10 @@
       </div>
 
       <div class="decision">
-        <p class="decision__label">Decision · Questions as content, not code</p>
+        <p class="decision__label">Decision · Question banks</p>
         <p>
-          <strong>The question banks are markdown files.</strong> The 25 habit
+          <strong>The question banks are markdown files rather than application
+          code.</strong> The 25 habit
           questions and 51 state questions live in two markdown files with stable keys,
           rubrics, and tags. The form, the engine, and the report all parse them at
           runtime. As the coach, I can reword a question, retire one, or add one
@@ -202,19 +207,20 @@
           provider request id. A coach-facing log viewer sits behind every report with
           a per-call cost estimate. When a report reads oddly, I can see precisely what
           the model was told and what it returned, and prompt versions make regressions
-          diffable. This turned prompt iteration from guesswork into review.
+          diffable. This makes prompt changes much easier to evaluate.
         </p>
       </div>
 
       <div class="decision">
-        <p class="decision__label">Decision · One report, two voices</p>
+        <p class="decision__label">Decision · Report versions</p>
         <p>
-          <strong>The report is authored in a coach voice and a client voice.</strong>
+          <strong>Each report is generated in two versions: one for the coach and one
+          for the client.</strong>
           The coach view is clinical third person and includes coach-only material
           (readiness assessment, self-awareness gaps where a client's self-rating
           contradicts their own numbers). The client view is second person and
-          motivational, with those sections hidden. Both voices are produced in the
-          same generation pass and stored on the same report, so they can never drift
+          motivational, with those sections hidden. Both versions are produced in the
+          same generation pass and stored on the same report, so they can't drift
           out of sync.
         </p>
       </div>
@@ -224,7 +230,7 @@
       <h2>Where This Design Breaks Down</h2>
       <ul>
         <li><strong>It assumes one coach.</strong> Data is scoped per coach, but there are no organisations, roles, or client sharing. Opening this to other coaches means real tenancy work, plus proper error alerting instead of reading Vercel logs.</li>
-        <li><strong>jsonb answers trade queryability for flexibility.</strong> Question changes are free, but cross-client analytics ("average sleep rating across all clients") means walking json in SQL. If the practice grows, the hot fields get promoted to columns.</li>
+        <li><strong>Storing answers as jsonb makes them harder to query.</strong> Question changes need no migration, but cross-client analytics ("average sleep rating across all clients") means walking json in SQL. If the practice grows, the frequently queried fields would need to be promoted to columns.</li>
         <li><strong>No automated alerting on AI degradation.</strong> A failed agent degrades gracefully and visibly in the report, but nothing pages me. Fine while I open every report myself; not fine with volume.</li>
       </ul>
     </section>
@@ -233,12 +239,14 @@
       <h2>What I'd Do Differently</h2>
       <ul>
         <li>
-          <strong>Test the email path on day one.</strong> Magic links shipped with a
+          <strong>Test the email path earlier.</strong> Magic links shipped with a
           copy-to-clipboard fallback, so actual email delivery through Resend went
-          unexercised for weeks. The fallback was so convenient it hid the untested path.
+          untested for weeks. Because the fallback was convenient, I never noticed
+          the email path wasn't being exercised.
         </li>
         <li>
-          <strong>Trust the schema tool less on constraints.</strong> Drizzle's push
+          <strong>Verify schema constraints against the database rather than trusting
+          the ORM.</strong> Drizzle's push
           silently skipped widening a CHECK constraint when a new value was added to an
           enum-like column, and the insert failed only at runtime. The fix was a manual
           ALTER in the database. Constraint changes now get verified against the live
@@ -250,8 +258,8 @@
           comparing clients to goal personas. It worked, but clients know where they
           stand: asking them to rate themselves 1 to 10 with a note produced a shorter
           form and a more honest report, and most of the inference engine was deleted.
-          The lesson is old but real: the clever system I enjoyed building was not the
-          simple system the product needed.
+          The more complex system was more interesting to build, but the simpler one
+          produced better results.
         </li>
       </ul>
     </section>
