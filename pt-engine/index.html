@@ -36,10 +36,8 @@
         <span class="tag">Next.js 16</span>
         <span class="tag">Vercel</span>
         <span class="tag">Neon Postgres</span>
-        <span class="tag">Drizzle ORM</span>
         <span class="tag">Clerk</span>
         <span class="tag">Claude API</span>
-        <span class="tag">Resend</span>
         <span class="tag">TypeScript</span>
       </div>
       <div style="margin-top:1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
@@ -58,10 +56,13 @@
         repeatable.
       </p>
       <p>
-        I wanted the intake information — goals, injuries, medical history, eating
-        patterns, sleep, stress, and a self-assessment of current habits — collected
-        before the first session and turned into a report that both the coach and the
-        client can work from.
+        I also coach in a specific way, and the reason I built this is that I wanted
+        onboarding and check-ins systemised around that coaching style rather than a
+        generic template. The goal was to collect the intake information — goals,
+        injuries, medical history, eating patterns, sleep, stress, and a
+        self-assessment of current habits — in one structured form, turn it into a
+        report that both the coach and the client can work from, and then keep the
+        same structure going with a weekly check-in.
       </p>
       <p>
         The second requirement was operational: this is a working tool for a real
@@ -73,14 +74,17 @@
     <section style="padding-top:2rem;">
       <h2>What It Does</h2>
       <p>
-        The coach logs in, adds a client, and sends them a magic link. The client fills
+        The coach logs in, adds a client, and starts the intake — either with a
+        "fill during session" button that opens the form directly, or by giving the
+        client a single-use link to complete it in their own time. The client fills
         in a two-sheet intake with no account and no password: one sheet of specifics
         (goals, injuries, medical history, what they actually eat, training and life
         logistics) and one sheet of 1-to-10 self-ratings across nutrition, sleep,
         stress, and movement, each with an optional one-line note in their own words.
         On submit, the engine scores the ratings deterministically, two AI agents
         interpret the free text, and a structured report is stored and rendered for
-        the coach. After onboarding, each client gets one reusable weekly check-in
+        the coach. After onboarding, the same structure continues week to week: I
+        built a weekly check-in form that each client accesses through one reusable
         link, and a third agent writes a coach-only trend read on every submission.
       </p>
 
@@ -88,7 +92,7 @@
         <table>
           <thead><tr><th>Outcome</th></tr></thead>
           <tbody>
-            <tr><td>Client onboarding runs without the coach present, from a single link</td></tr>
+            <tr><td>Client intake collected through one structured form, in session or via a link</td></tr>
             <tr><td>Coach-ready report generated within a minute of the client submitting</td></tr>
             <tr><td>Each report generated in two versions: one for the coach (clinical, third person) and one for the client (second person)</td></tr>
             <tr><td>Weekly check-ins on one reusable link per client, with an AI trend narrative</td></tr>
@@ -107,7 +111,7 @@
         where each sits.
       </p>
       <pre>Coach dashboard                    Client (no account)
-(Clerk-protected)                  (magic link, single-use)
+(Clerk-protected)                  (single-use link or in-session)
       │                                   │
   add client ──── intake link ───────────►│
       │                                   │
@@ -146,12 +150,12 @@
           <strong>Managed platform over self-built infrastructure.</strong> My other
           projects run on hand-built AWS: VPCs, ECS, Terraform. This one deliberately
           doesn't. Vercel hosts the Next.js app, Neon provides serverless Postgres in
-          the Sydney region, Clerk handles coach auth, Resend sends the emails. Deploys
+          the Sydney region, and Clerk handles coach auth. Deploys
           are a git push, preview environments are free, and there is no instance
           anywhere that can fill a disk or miss a patch. For a tool supporting a
           one-person business, low operational overhead was the most important
           requirement. The tradeoff is platform lock-in, which I judged acceptable
-          because every piece (Postgres, React, transactional email) is portable in
+          because every piece (Postgres, React, coach auth) is portable in
           substance even if the wiring is not.
         </p>
       </div>
@@ -168,6 +172,31 @@
           revocation instead of expiry and a 20-hour double-submit guard. Two different
           token models for two different behaviours, each implemented as its own small
           validator rather than one generic system.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Decision · Delivering the intake form</p>
+        <p>
+          <strong>The intake form is opened in the session rather than emailed.</strong>
+          I considered emailing the form to clients through Resend, and spent some
+          time on whether I wanted email delivery at all. In the end I added a
+          "fill during session" button that opens the form directly from the client's
+          record, alongside the option of handing over a link. Dropping email meant
+          one less external service to integrate and test, and it fits how onboarding
+          actually happens in my practice.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Decision · Knowledge base</p>
+        <p>
+          <strong>A coaching knowledge base is shared between the coach and the AI
+          agents.</strong> The way I coach is written down in a set of reference
+          documents. I can consult them myself, and the agents draw on the same
+          material when writing reports and check-in reads, so the AI output stays
+          consistent with how I actually work with clients instead of defaulting to
+          generic fitness advice.
         </p>
       </div>
 
@@ -227,6 +256,19 @@
     </section>
 
     <section style="padding-top:2rem;">
+      <h2>How It Was Built</h2>
+      <p>
+        I used Claude Code heavily throughout. This is a working tool for my own
+        business, so I favoured whatever got features built and tested in the
+        shortest amount of time: describe the behaviour, have the assistant write
+        the code, then test it against real intake data and correct from there.
+        The design decisions above — where the AI boundaries sit, how the tokens
+        work, what stays deterministic — were mine; Claude Code did most of the
+        typing.
+      </p>
+    </section>
+
+    <section style="padding-top:2rem;">
       <h2>Where This Design Breaks Down</h2>
       <ul>
         <li><strong>It assumes one coach.</strong> Data is scoped per coach, but there are no organisations, roles, or client sharing. Opening this to other coaches means real tenancy work, plus proper error alerting instead of reading Vercel logs.</li>
@@ -239,18 +281,11 @@
       <h2>What I'd Do Differently</h2>
       <ul>
         <li>
-          <strong>Test the email path earlier.</strong> Magic links shipped with a
-          copy-to-clipboard fallback, so actual email delivery through Resend went
-          untested for weeks. Because the fallback was convenient, I never noticed
-          the email path wasn't being exercised.
-        </li>
-        <li>
           <strong>Verify schema constraints against the database rather than trusting
-          the ORM.</strong> Drizzle's push
-          silently skipped widening a CHECK constraint when a new value was added to an
-          enum-like column, and the insert failed only at runtime. The fix was a manual
-          ALTER in the database. Constraint changes now get verified against the live
-          schema, not assumed from the ORM.
+          the schema tooling.</strong> A schema push silently skipped widening a CHECK
+          constraint when a new value was added to an enum-like column, and the insert
+          failed only at runtime. The fix was a manual ALTER in the database.
+          Constraint changes now get verified against the live schema.
         </li>
         <li>
           <strong>Design the intake as self-ratings from the start.</strong> Version one
