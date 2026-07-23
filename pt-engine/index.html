@@ -27,10 +27,9 @@
       <p class="page-header__eyebrow">Full-Stack Product · Client Onboarding System</p>
       <h1 class="page-header__title">PT-Engine</h1>
       <p class="page-header__subtitle">
-        Client onboarding and reporting system for my personal-training practice.
-        New clients complete an intake form before their first session, and the
-        system generates a structured report for the coach, with sections written
-        by AI agents.
+        Client onboarding system for my personal-training work.
+        New clients complete an intake form, and the
+        system generates a structured report for the coach, which helps me to create a plan for the client.
       </p>
       <div class="tags" style="margin-top:1.25rem;">
         <span class="tag">Next.js 16</span>
@@ -56,26 +55,18 @@
 
     <section style="padding-top:1.5rem;">
       <h2>The Problem</h2>
+ 
       <p>
-        The intake conversation with a new coaching client normally takes up most of
-        the first session. The answers end up in the coach's head or in scattered
-        notes, and the quality of the first program depends on how thorough that one
-        conversation was. This doesn't scale past a handful of clients, and it isn't
-        repeatable.
-      </p>
-      <p>
-        I also coach in a specific way, and the reason I built this is that I wanted
-        onboarding and check-ins systemised around that coaching style rather than a
-        generic template. The goal was to collect the intake information — goals,
+        I coach in a specific way, and the reason I built this is that I wanted
+        onboarding and check-ins systemised around my own coaching style rather than using a
+        generic template. Up until now, I've also not been able to delivr any sort of report to m clients, and having something tangible for them to read, really helps convey a sense of professionalisma nd value. My goal for this system was to collect the client's information — goals,
         injuries, medical history, eating patterns, sleep, stress, and a
         self-assessment of current habits — in one structured form, turn it into a
         report that both the coach and the client can work from, and then keep the
         same structure going with a weekly check-in.
       </p>
       <p>
-        The second requirement was operational: this is a working tool for a real
-        business run by one person. Hosting had to be simple, reliable, and close to
-        free, with no servers to patch and no infrastructure to maintain.
+        The second requirement was operational: I made this for me, to make my own work more efficient (and even more professional). The actual app including it's infrastrcutre had to be simple.
       </p>
     </section>
 
@@ -85,7 +76,7 @@
         The coach logs in, adds a client, and starts the intake — either with a
         "fill during session" button that opens the form directly, or by giving the
         client a single-use link to complete it in their own time. The client fills
-        in a two-sheet intake with no account and no password: one sheet of specifics
+        in a two-sheet intake: one sheet of specifics
         (goals, injuries, medical history, what they actually eat, training and life
         logistics) and one sheet of 1-to-10 self-ratings across nutrition, sleep,
         stress, and movement, each with an optional one-line note in their own words.
@@ -105,7 +96,7 @@
             <tr><td>Each report generated in two versions: one for the coach (clinical, third person) and one for the client (second person)</td></tr>
             <tr><td>Weekly check-ins on one reusable link per client, with an AI trend narrative</td></tr>
             <tr><td>Every AI call logged with prompt version, tokens, cost estimate and request id</td></tr>
-            <tr><td>Hosting and database run in managed free tiers; AI costs are cents per client</td></tr>
+            <tr><td>Hosting and database run in managed free tiers; AI costs are about 17 cents per intake form (full length intake form)</td></tr>
           </tbody>
         </table>
       </div>
@@ -141,11 +132,7 @@
       │
   report viewer (coach / client voice) ── weekly check-in loop</pre>
       <p>
-        All numeric output is produced by deterministic TypeScript: the rating scores,
-        the focus-habit selection, the fat-loss timeline calculator, the
-        self-awareness gap checks. The AI agents only interpret free text and write
-        prose. They are not used to produce numbers, and the prompt instructs them
-        not to re-rate anything the client has already rated themselves.
+        
       </p>
     </section>
 
@@ -232,20 +219,6 @@
           throw away an intake: if an agent fails, the report still renders from the
           deterministic output with a visible "rules-based only" notice, and the
           failure is logged. The client's data is written before any AI runs.
-        </p>
-      </div>
-
-      <div class="decision">
-        <p class="decision__label">Decision · Question banks</p>
-        <p>
-          <strong>The question banks are markdown files rather than application
-          code.</strong> The 25 habit
-          questions and 51 state questions live in two markdown files with stable keys,
-          rubrics, and tags. The form, the engine, and the report all parse them at
-          runtime. As the coach, I can reword a question, retire one, or add one
-          without touching application code, and intake answers are stored as jsonb so
-          question changes never need a migration. Retired questions keep labelling old
-          answers instead of orphaning them.
         </p>
       </div>
 
