@@ -227,37 +227,83 @@ Redis Security Group</pre>
 └── versions.tf       # Provider version pins</pre>
 
         <div class="callout">
-          <strong>Redis and ECS look mutually dependent, but the cycle is resource-level, not
-          module-level.</strong> The Redis security group needs to reference the Fargate service's
-          security group as its ingress source, and the ECS task definition needs the Redis endpoint
-          and auth secret ARN. At the root module, <code>ecs_compute</code> and <code>elasticache</code>
-          do reference each other's outputs — but the two resources involved
-          (<code>aws_security_group.service</code> in <code>ecs_compute/</code>, and the Redis auth
-          secret in <code>elasticache/</code>) don't depend on each other. Terraform builds its
-          dependency graph at the resource level, so it can order these as two independent chains
-          even though the modules reference each other.
+          <strong>Redis and ECS look dependent on each other according to the modules, but it's not
+          a cycle dependency problem.</strong> Terraform's dependency graph is built per-resource,
+          not per-module. Here, the Redis security group's ingress rule needs the ECS security
+          group's ID, and the ECS task definition needs the Redis auth-token secret's ARN. But the
+          security group itself and the secret itself are independent resources, so Terraform
+          creates both of those first. Only after that does it create the ingress rule and the task
+          definition — followed by the actual Fargate service and Redis replication group each
+          module exists for.
         </div>
 
         <h3>Module Outputs as Inputs</h3>
         <p>
-          Modules expose typed outputs that other modules consume directly. For example:
+          Modules expose typed outputs that other modules consume directly. In
+          <code>ecs_compute/main.tf</code>, the task definition takes its secrets list as a variable:
+        </p>
+        <pre>resource "aws_security_group" "service" {
+  count  = var.enabled ? 1 : 0
+  name   = local.service_sg_name
+  vpc_id = var.vpc_id
+}
+
+resource "aws_ecs_task_definition" "app" {
+  count = var.enabled ? 1 : 0
+  container_definitions = jsonencode([{
+    # ...
+    secrets = var.container_secrets   # Redis auth token flows in here
+  }])
+}</pre>
+        <p>
+          In <code>elasticache/main.tf</code>, the ingress rule takes the ECS security group's ID
+          as a variable, and the auth-token secret depends only on a local <code>random_password</code>:
+        </p>
+        <pre>resource "aws_security_group" "redis" {
+  name   = local.security_group_name
+  vpc_id = var.vpc_id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "from_ecs_service" {
+  count                         = var.enable_ecs_service_ingress ? 1 : 0
+  security_group_id             = aws_security_group.redis.id
+  referenced_security_group_id  = var.ecs_service_security_group_id
+  from_port                     = var.port
+  to_port                       = var.port
+  ip_protocol                   = "tcp"
+}
+
+resource "aws_secretsmanager_secret" "redis_auth_token" {
+  name                    = local.auth_secret_name
+  recovery_window_in_days = 7
+}</pre>
+        <p>
+          The root module wires the two together in both directions without forming a cycle,
+          because each side only needs the other's leaf output:
         </p>
         <pre># In main.tf
-module "elasticache" {
-  source                         = "./modules/elasticache"
-  private_data_subnet_ids        = module.vpc.private_data_subnet_ids
-  ecs_service_security_group_id  = module.ecs_compute.service_security_group_id
+locals {
+  ecs_container_secrets_effective = concat(var.ecs_container_secrets, [{
+    name      = "REDIS_AUTH_TOKEN"
+    valueFrom = "${module.elasticache.redis_auth_secret_arn}:auth_token::"
+  }])
 }
 
 module "ecs_compute" {
-  source         = "./modules/ecs_compute"
-  redis_endpoint = module.elasticache.primary_endpoint
-  redis_secret_arn = module.elasticache.redis_auth_secret_arn
+  source            = "./modules/ecs_compute"
+  container_secrets = local.ecs_container_secrets_effective
+}
+
+module "elasticache" {
+  source                        = "./modules/elasticache"
+  ecs_service_security_group_id = module.ecs_compute.service_security_group_id
 }</pre>
         <p>
-          This wiring means Terraform's dependency graph is explicit — it knows to create
-          ElastiCache's secret resource before the ECS task definition, and the ECS security
-          group before Redis's ingress rule, without the two modules forming an actual cycle.
+          The Redis hostname itself isn't wired through Terraform this way. <code>REDIS_HOST</code>
+          in <code>terraform.tfvars.example</code> is a plain string variable, pasted in manually
+          after the first <code>elasticache</code> apply once the primary endpoint exists. The only
+          coupling Terraform resolves automatically is the security-group ID and the auth-token
+          secret ARN — both cheap enough to sit on either side of the graph without a real cycle.
         </p>
       </section>
 
