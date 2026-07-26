@@ -227,13 +227,15 @@ Redis Security Group</pre>
 └── versions.tf       # Provider version pins</pre>
 
         <div class="callout">
-          <strong>ECS split into two modules.</strong> The ECS identity module (<code>ecs/</code>)
-          creates IAM roles and policies only — task execution role and task role. The ECS compute module
-          (<code>ecs_compute/</code>) creates the cluster, task definition, ECS service, Fargate
-          security group, ECR repository, and CloudWatch log group. This split
-          breaks a circular dependency: the Redis security group needs to reference the Fargate
-          task security group as its source, but the task definition needs the Redis endpoint.
-          Separating the resources removes the cycle.
+          <strong>Redis and ECS look mutually dependent, but the cycle is resource-level, not
+          module-level.</strong> The Redis security group needs to reference the Fargate service's
+          security group as its ingress source, and the ECS task definition needs the Redis endpoint
+          and auth secret ARN. At the root module, <code>ecs_compute</code> and <code>elasticache</code>
+          do reference each other's outputs — but the two resources involved
+          (<code>aws_security_group.service</code> in <code>ecs_compute/</code>, and the Redis auth
+          secret in <code>elasticache/</code>) don't depend on each other. Terraform builds its
+          dependency graph at the resource level, so it can order these as two independent chains
+          even though the modules reference each other.
         </div>
 
         <h3>Module Outputs as Inputs</h3>
@@ -242,19 +244,20 @@ Redis Security Group</pre>
         </p>
         <pre># In main.tf
 module "elasticache" {
-  source             = "./modules/elasticache"
-  private_data_subnet_ids = module.vpc.private_data_subnet_ids
-  fargate_sg_id      = module.ecs.fargate_task_sg_id
+  source                         = "./modules/elasticache"
+  private_data_subnet_ids        = module.vpc.private_data_subnet_ids
+  ecs_service_security_group_id  = module.ecs_compute.service_security_group_id
 }
 
 module "ecs_compute" {
   source         = "./modules/ecs_compute"
   redis_endpoint = module.elasticache.primary_endpoint
-  redis_secret_arn = module.elasticache.auth_token_secret_arn
+  redis_secret_arn = module.elasticache.redis_auth_secret_arn
 }</pre>
         <p>
           This wiring means Terraform's dependency graph is explicit — it knows to create
-          ElastiCache before the ECS service, and to destroy the ECS service before ElastiCache.
+          ElastiCache's secret resource before the ECS task definition, and the ECS security
+          group before Redis's ingress rule, without the two modules forming an actual cycle.
         </p>
       </section>
 
