@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Beige Chess App — Technical Deep-Dive</title>
+  <meta name="description" content="Beige Chess App technical architecture: two-plane AWS split, data pipeline, DynamoDB schema, CI/CD, and cost." />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+
+  <nav class="site-nav">
+    <div class="site-nav__inner">
+      <a href="/" class="site-nav__logo">tim hewitt</a>
+      <ul class="site-nav__links">
+        <li><a href="/#projects">Projects</a></li>
+        <li><a href="/#about">About</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn ↗</a></li>
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Page header outside the layout grid -->
+  <div class="container">
+    <header class="page-header">
+      <p class="page-header__eyebrow"><a href="index.html">Beige Chess App</a> · Technical Deep-Dive</p>
+      <h1 class="page-header__title" style="font-size:clamp(1.6rem,4vw,2.25rem);">Two-Plane Architecture, Data Pipeline &amp; CI/CD</h1>
+      <p class="page-header__subtitle">
+        Why the app is split into a read plane and a write plane, how the puzzle
+        dataset is tagged and served, the DynamoDB schema, and a real production
+        incident the CI/CD pipeline exists to prevent.
+      </p>
+      <div style="margin-top:1rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
+        <a href="index.html" class="btn btn--outline" style="font-size:0.82rem;">← Project overview</a>
+        <a href="https://puzzles.beigechessapp.com" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">Live site ↗</a>
+      </div>
+    </header>
+  </div>
+
+  <!-- Two-column layout: sidebar + content -->
+  <div class="page-layout">
+
+    <!-- ── Sidebar ──────────────────────────────────────────── -->
+    <aside class="page-sidebar">
+      <p class="page-sidebar__title">Contents</p>
+      <nav id="toc">
+        <span class="nav-section">Architecture</span>
+        <a href="#two-plane">Two-Plane Architecture</a>
+
+        <span class="nav-section">Data</span>
+        <a href="#data-pipeline">Data Pipeline &amp; Tagging</a>
+        <a href="#dynamodb-schema">DynamoDB Schema</a>
+        <a href="#event-model">Event Model &amp; Idempotency</a>
+
+        <span class="nav-section">Identity</span>
+        <a href="#identity">Cognito &amp; Required Accounts</a>
+
+        <span class="nav-section">Infrastructure as Code</span>
+        <a href="#terraform-cicd">Terraform &amp; CI/CD</a>
+        <a href="#incident">The Stale-Deploy Incident</a>
+
+        <span class="nav-section">Application</span>
+        <a href="#mobile">Mobile Packaging</a>
+
+        <span class="nav-section">Operations</span>
+        <a href="#limitations">Known Limitations</a>
+        <a href="#cost">Cost Model</a>
+      </nav>
+    </aside>
+
+    <!-- ── Main content ─────────────────────────────────────── -->
+    <main class="page-content">
+
+      <!-- ── Two-Plane Architecture ────────────────────────── -->
+      <section id="two-plane">
+        <h2>Two-Plane Architecture</h2>
+        <p>
+          The app is really two very different workloads, kept deliberately separate so
+          neither one contaminates the other: an anonymous, high-volume, latency-critical
+          <strong>read plane</strong> serving the puzzle catalog, and a per-user,
+          low-volume, spiky <strong>write plane</strong> handling accounts, progress, and
+          Lichess import.
+        </p>
+        <pre>                 Capacitor app (iOS)
+                          │
+              Cognito (Apple / Google) ── JWT
+                          │
+            ┌─────────────┴─────────────┐
+      /api/puzzle/*        /api/user/*, /api/lichess/*
+       READ plane                  WRITE plane
+  ┌───────────────────┐   ┌────────────────────────────┐
+  │ Lightsail         │   │ API Gateway (HTTP)         │
+  │ container service │   │  + Cognito authorizer      │
+  │ server.py +       │   │             │              │
+  │ SQLite catalog    │   │             ▼              │
+  │ (2.95M puzzles)   │   │         Lambda ×6          │
+  └───────────────────┘   │             │              │
+                          │      ┌──────┴───────┐      │
+                          │      ▼              ▼      │
+                          │ chess-users    puzzles-ref │
+                          │   DynamoDB tables          │
+                          └────────────────────────────┘</pre>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th></th><th>Read plane (catalog)</th><th>Write plane (user)</th></tr></thead>
+            <tbody>
+              <tr><td>Serves</td><td>Anonymous puzzle catalog</td><td>Per-user data + Lichess import</td></tr>
+              <tr><td>Data</td><td>SQLite baked into the container image, read-only</td><td>DynamoDB (<code>chess-users</code>, <code>puzzles-ref</code>)</td></tr>
+              <tr><td>Compute</td><td>Lightsail container service — flat rate, HTTPS built in, no ALB, no VPC</td><td>Lambda, scale-to-zero, behind API Gateway</td></tr>
+              <tr><td>Traffic</td><td>High-volume, latency-critical</td><td>Low-volume, spiky, not latency-critical</td></tr>
+              <tr><td>Auth</td><td>JWT attached for attribution only</td><td>JWT required — Cognito authorizer</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          The read plane is <em>exactly</em> the local prototype's <code>server.py</code>
+          plus SQLite — nothing about it changes between prototype and production. It's
+          deployed to an AWS Lightsail container service rather than Fargate behind an
+          ALB purely to cut cost and complexity: a flat ~$10/month with HTTPS and a custom
+          domain built in, no ALB, no customer-managed VPC to design. The write plane's
+          traffic profile — a handful of calls per session, idle most of the time — fits
+          API Gateway + Lambda + DynamoDB far better than it fits the always-on, DB-heavy
+          catalog container. Lambda cold starts, which correctly ruled Lambda out for the
+          catalog, don't matter here: these functions are small and the calls aren't
+          latency-critical the way "give me the next puzzle instantly" is.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Data Pipeline & Tagging ────────────────────────── -->
+      <section id="data-pipeline">
+        <h2>Data Pipeline &amp; Tagging</h2>
+        <p>
+          Every puzzle's tags come from replaying its actual solution moves with
+          <code>python-chess</code> — motifs, special moves, pawn structure, and game
+          phase are all derived from what the solution sequence itself does, scoped to
+          the piece that just moved. Lichess's own crowd-tagged <code>Themes</code> column
+          is never read anywhere in the pipeline. A quality filter (popularity ≥ 90, plays
+          ≥ 100, rating 600–3000) is baked into extraction, which brings the raw ~6.06M
+          Lichess puzzles down to the 2,953,517 the app actually serves.
+        </p>
+        <p>
+          The production build runs the tagging pass <strong>twice</strong>: once with the
+          quality filter on (the served catalog) and once with it off, tagging all
+          ~6.06M raw puzzles as a full analyzed reference. That second run matters because
+          a user's Lichess puzzle history references the <em>full</em> Lichess ID space,
+          not our filtered subset — importing that history needs tag coverage for
+          essentially every puzzle Lichess has ever served, not just the quality-filtered
+          slice the app itself plays from.
+        </p>
+        <div class="callout">
+          <strong>One tagging computation, three artifacts.</strong> The full reference
+          build, the served catalog, and the DynamoDB lookup table below are all derived
+          from the same single tagging run — the catalog is a filtered subset export of
+          the reference build, not a second independent extraction. That means the catalog
+          and the reference can never drift on a puzzle's tags; it's literally the same
+          computation, just filtered differently downstream.
+        </div>
+        <h3>The <code>puzzles-ref</code> Lookup Table</h3>
+        <p>
+          The full reference build is loaded into a DynamoDB table, <code>puzzles-ref</code>,
+          keyed by <code>puzzleId</code>. When a user links Lichess, the import Lambda does
+          a <code>BatchGetItem</code> against it instead of re-analyzing puzzles at import
+          time — a popular puzzle that shows up in 10,000 users' histories gets analyzed
+          exactly once, ever, not 10,000 times. It also keeps the import Lambda tiny: no
+          bundled multi-gigabyte database, no <code>python-chess</code> dependency in the
+          Lambda at all.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── DynamoDB Schema ───────────────────────────────── -->
+      <section id="dynamodb-schema">
+        <h2>DynamoDB Schema</h2>
+        <p>
+          <code>chess-users</code> is a single-table design, PK/SK, on-demand billing. All
+          access is by known user, time-ranged — no cross-user queries exist in this app —
+          which is exactly DynamoDB's sweet spot.
+        </p>
+        <div class="schema-card">
+          <div class="schema-card__header">chess-users</div>
+          <div class="schema-card__section">
+            <div class="schema-card__section-label">Keys</div>
+            <div class="schema-card__row">
+              <span class="schema-badge schema-badge--pk">PK</span>
+              <span class="schema-card__key">USER#&lt;sub&gt;</span>
+              <span class="schema-card__key-note">Cognito sub — everything for a user lives under this partition</span>
+            </div>
+            <div class="schema-card__row">
+              <span class="schema-badge schema-badge--sk">SK</span>
+              <span class="schema-card__key">PROFILE | INSIGHTS | ACT#&lt;ulid&gt;</span>
+              <span class="schema-card__key-note">three item shapes per user</span>
+            </div>
+          </div>
+          <div class="schema-card__section">
+            <div class="schema-card__section-label">Attributes</div>
+            <div class="schema-card__attrs">
+              <strong>PROFILE</strong> — userName, createdAt, overall ELO, solved/failed counts, Lichess linkage (username + anchor ELO, never the token)<br>
+              <strong>INSIGHTS</strong> — tagStats / motifStats / phaseStats, each <code>{attempts, solved}</code><br>
+              <strong>ACT#</strong> — one attempt: puzzleId, result, playedAt, source
+            </div>
+          </div>
+        </div>
+        <div class="callout">
+          <strong>Why a ULID sort key, not a plain timestamp?</strong> The first 48 bits
+          are a millisecond timestamp and the rest is random, so <code>ACT#</code> items
+          sort lexicographically in play-order for free — a <code>begins_with ACT#</code>
+          query returns history already ordered, with no separate index. It's also
+          globally unique with no coordination, and the client generates it at solve time,
+          so it reflects when a puzzle was actually played even if the event sat in an
+          offline queue before syncing.
+        </div>
+        <h3>puzzles-ref</h3>
+        <div class="schema-card">
+          <div class="schema-card__header">puzzles-ref</div>
+          <div class="schema-card__section">
+            <div class="schema-card__section-label">Keys</div>
+            <div class="schema-card__row">
+              <span class="schema-badge schema-badge--pk">PK</span>
+              <span class="schema-card__key">puzzleId (S)</span>
+            </div>
+          </div>
+          <div class="schema-card__section">
+            <div class="schema-card__section-label">Attributes</div>
+            <div class="schema-card__attrs">the full precomputed tag set for every Lichess puzzle (~6.06M items) — motifs, special moves, pawn structure, game phase</div>
+          </div>
+        </div>
+        <p>
+          This table costs a few dollars a month in storage whether or not anyone ever
+          imports Lichess history — an accepted trade for keeping the import Lambda tiny
+          and the lookup always fresh without redeploying anything.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Event Model & Idempotency ──────────────────────── -->
+      <section id="event-model">
+        <h2>Event Model &amp; Idempotency</h2>
+        <p>
+          The client posts an <em>event</em> — "solved puzzle X, rating R, win" — and the
+          server applies the ELO delta to <code>PROFILE.userElo</code>, never the other
+          way round. If the client computed its own ELO locally, two devices could each
+          apply the same history against a stale local copy and diverge; sending events
+          instead of computed state is what keeps cross-device sync consistent. The
+          client can still update optimistically for instant feedback, but the server
+          stays the source of truth.
+        </p>
+        <p>
+          Writing an <code>ACT#</code> item uses
+          <code>ConditionExpression: attribute_not_exists(SK)</code>, so a replayed event —
+          from an offline queue flushing twice, or a network retry — is a harmless no-op
+          instead of double-counting a solve. Lichess imports use a variant: there's no
+          client-generated ULID for historical entries, so a deterministic ID is derived
+          from <code>puzzleId + date</code> instead, keeping the same idempotency
+          guarantee while still sorting correctly alongside genuine live-play events.
+        </p>
+        <h3>The ELO Formula</h3>
+        <pre>delta   = K * (actual - expected)
+expected = 1 / (1 + 10^((puzzleRating - userElo) / 400))
+K = 20, floored at 100, starting at 600</pre>
+        <p>
+          This replaced an earlier flat +8-on-solve / −7-on-fail delta, which had no
+          ceiling-awareness — a player who outclassed the puzzle pool just climbed
+          unbounded instead of plateauing near the dataset's real rating ceiling. The
+          per-motif/phase/piece numbers on <code>INSIGHTS</code> are deliberately
+          <strong>not</strong> an ELO at all anymore — they're plain
+          <code>{attempts, solved}</code> counters shown as an accuracy percentage, since a
+          flat delta was never difficulty-calibrated the way the main ELO is.
+        </p>
+        <div class="callout callout--warn">
+          <strong>This scheme is rating-dependent, so it isn't commutative.</strong> Each
+          delta depends on the <code>userElo</code> value at the moment it's applied, so
+          processing the same two events in a different order lands on a slightly
+          different final number. The idempotency check above still prevents the same
+          event from double-applying — only two genuinely different, near-simultaneous
+          events on different devices can race. Per-user ordered processing (an SQS FIFO
+          queue keyed by user) would remove that residual race entirely; it isn't
+          implemented today, on the judgment that it isn't worth the extra moving part
+          until multi-device concurrent play is actually observed to cause drift.
+        </div>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Identity ──────────────────────────────────────── -->
+      <section id="identity">
+        <h2>Cognito &amp; Required Accounts</h2>
+        <p>
+          A Cognito user pool with Sign in with Apple and Google federated in — no
+          email/password flow, no guest path in the original design. Skipping
+          email/password entirely means no password-reset flow to build and no
+          credentials to store; Cognito's <code>sub</code> is the canonical user ID used
+          everywhere downstream. Sign in with Apple isn't optional here: Apple's Guideline
+          4.8 requires offering it the moment you offer any other social login, so it was
+          built in from day one rather than added under review pressure later.
+        </p>
+        <p>
+          Choosing required accounts over a local-first design carries two consequences
+          that a "no accounts" version wouldn't have had. <strong>In-app account deletion
+          is mandatory</strong> (Apple Guideline 5.1.1) — <code>DELETE /api/user</code> has
+          to purge both the Cognito user and every DynamoDB item under their partition,
+          and it was built from day one rather than retrofitted. And the App Privacy
+          nutrition label has to honestly disclose "data collected, linked to identity" —
+          account info, puzzle-history usage data, Lichess linkage — it can no longer
+          claim "no data collected."
+        </p>
+        <div class="callout">
+          <strong>The guest-mode carve-out.</strong> Required accounts meant Apple's
+          reviewer had nothing to test the app with — no demo account exists, and sign-in
+          is social-only. That surfaced as a real Guideline 2.1 rejection during App
+          Review. The fix was a "Continue as Guest" path, backed purely by local storage,
+          added specifically so a reviewer (or anyone else) can use the whole app with no
+          account at all. Every write-plane call was already guarded on holding a real
+          Cognito token, so guest play needed no backend changes — it was already
+          "supported," just unreachable through the UI until this shipped.
+        </div>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Terraform & CI/CD ──────────────────────────────── -->
+      <section id="terraform-cicd">
+        <h2>Terraform &amp; CI/CD</h2>
+        <p>
+          The whole stack is one root Terraform module with <code>dev</code>/<code>prod</code>
+          workspaces rather than separate directory trees, so both environments stay
+          structurally identical with nothing hand-duplicated. State lives remotely in S3
+          with Terraform's native <code>use_lockfile</code> locking (Terraform ≥ 1.10) — no
+          separate DynamoDB lock table needed.
+        </p>
+        <pre># backend.tf
+terraform {
+  backend "s3" {
+    bucket       = "chess-practice-app-tfstate-xxxxxxxxxxxx"
+    use_lockfile = true
+  }
+}</pre>
+        <h3>GitHub OIDC, Not Long-Lived Keys</h3>
+        <p>
+          A GitHub OIDC identity provider plus two IAM roles, distinguished by which
+          GitHub event can assume them: a read-only plan role trusted only for
+          <code>pull_request</code>-triggered runs, and an apply-capable deploy role
+          trusted only for pushes to <code>main</code>. No long-lived AWS access keys are
+          stored as GitHub secrets anywhere — every workflow run gets short-lived,
+          narrowly-trusted credentials instead.
+        </p>
+        <div class="callout">
+          <strong>The deploy role is deliberately broader than textbook
+          least-privilege</strong> for a handful of services whose ARNs aren't cheaply
+          prefixable before the resource exists — API Gateway, Cognito, Lightsail, Route
+          53, ACM, CloudWatch get an account-wide allow. That's an accepted tradeoff for a
+          solo-owner AWS account dedicated to one project. IAM itself is the one
+          deliberately tight exception — scoped to this project's own role/policy ARNs
+          only, never <code>iam:*</code>.
+        </div>
+        <h3>Required PR Checks</h3>
+        <p>
+          Branch protection on <code>main</code> requires five jobs to pass before merge:
+          a correctness-only lint pass (not full style enforcement), Terraform
+          <code>fmt</code>/<code>validate</code> plus a real read-only
+          <code>terraform plan</code> posted as a sticky PR comment, a Docker build plus a
+          smoke test run against the built container, and the write-plane Lambda tests run
+          against a real DynamoDB Local service container in CI.
+        </p>
+        <h3>Deploy on Merge</h3>
+        <p>
+          On every push to <code>main</code>: download the puzzle database artifact from
+          S3 → build and push a fresh container image → <code>terraform apply</code> with
+          the freshly-pushed image ref passed as a <code>-var</code> override (no need to
+          edit <code>prod.tfvars</code> mid-run) → poll until the deployment reports
+          running → re-run the same smoke test against the real live site → only on
+          success, bot-commit the new image tag back into <code>prod.tfvars</code> for
+          human-readable repo truth.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── The Stale-Deploy Incident ──────────────────────── -->
+      <section id="incident">
+        <h2>The Stale-Deploy Incident</h2>
+        <p>
+          This CI/CD pipeline exists because of a real production bug, not as a
+          precaution taken in the abstract. <code>prod.tfvars</code>'s
+          <code>lightsail_image</code> pointed at a tag Lightsail confirmed was running —
+          but the image behind that tag had been built from a commit that predated a
+          response-shape change the live frontend already depended on (the client's
+          puzzle-prefetch queue needed a <code>puzzles: [...]</code> array; the deployed
+          server was still returning a singular <code>puzzle</code>).
+        </p>
+        <p>
+          Every filtered or rated puzzle fetch silently came back empty. Rated Play
+          flashed the board and then bounced back to the puzzle-selection screen with a
+          false "no puzzles match this combination" — reproducible even with every motif
+          and the full ELO range selected, which made it look at first like database
+          corruption rather than a stale deploy.
+        </p>
+        <div class="callout callout--warn">
+          <strong>Root-caused with a direct curl comparison</strong>, not by guessing: the
+          live endpoint returned a bare <code>puzzle</code> object, while the current
+          <code>server.py</code> run locally against the real database correctly returned
+          <code>puzzles</code>. Same code, different behaviour — proof this was a
+          stale-image problem, not corrupted data. It was also the <em>third</em>
+          documented instance of the same underlying "commit merged ≠ deployed" gap in
+          this project — every deploy step before this pipeline existed was manual, and
+          easy to partially skip or lose track of during a same-day branch merge.
+        </div>
+        <p>
+          Fixed live in that session with a real rebuild, push, <code>terraform apply</code>,
+          and a curl-verified deploy — then this entire CI/CD pipeline, specifically so the
+          same failure mode can't recur silently again. The pipeline's smoke test
+          (<code>scripts/smoke_test_server.py</code>) is a direct regression test for this
+          exact incident: it hits the live site with the broadest-possible-filter shape
+          that reproduced the bug and asserts a genuinely non-empty <code>puzzles</code>
+          array, not just a 200 status code.
+        </p>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Mobile Packaging ────────────────────────────────── -->
+      <section id="mobile">
+        <h2>Mobile Packaging (Capacitor)</h2>
+        <p>
+          Capacitor wraps the exact same <code>index.html</code>/<code>app.js</code>/
+          <code>style.css</code> as a native iOS/Android app rather than maintaining a
+          separate mobile codebase. One command copies the web sources into Capacitor's
+          required <code>www/</code> build directory and re-syncs both native projects.
+        </p>
+        <div class="callout">
+          <strong>Why <code>API_BASE</code> exists at all.</strong> The native shell runs
+          the bundled frontend from <code>capacitor://localhost</code> (iOS) or
+          <code>https://localhost</code> (Android), not the real domain — so a plain
+          relative <code>/api/*</code> call would resolve against the app's own local
+          bundle instead of the real backend. <code>API_BASE</code> only changes behaviour
+          for <code>window.Capacitor?.isNativePlatform?.()</code>; the plain web build
+          keeps using relative paths unmodified. <code>server.py</code>'s CORS allowlist
+          permits exactly those two native origins, nothing else.
+        </div>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Known Limitations ───────────────────────────────── -->
+      <section id="limitations">
+        <h2>Known Limitations</h2>
+        <p>
+          I ran a fuller security and architecture review of the live AWS account
+          separately — IAM hygiene, CloudTrail, cost anomaly detection, rate limiting,
+          per-Lambda IAM scoping — and I'm keeping that as its own dedicated write-up once
+          I've worked through which findings actually get fixed versus consciously
+          deferred. Two things are worth flagging here directly since they're structural
+          choices, not just missing configuration:
+        </p>
+        <ul>
+          <li>
+            <strong>No rate limiting or WAF on the public read API.</strong> Serving the
+            catalog anonymously (by design — it's read-only puzzle data) means it's also
+            fully unthrottled today. Nothing stops a script from hammering it and running
+            up compute cost.
+          </li>
+          <li>
+            <strong>All six write-plane Lambdas share one IAM execution role.</strong>
+            That role carries a couple of permissions (like Cognito user deletion) only
+            one specific function actually uses, so in principle another function could
+            call something it never legitimately needs. It's an artifact of one shared
+            deployment package, not a deliberate scoping decision.
+          </li>
+          <li>
+            <strong>The Stockfish eval pass is built but deliberately not run yet.</strong>
+            It would unlock eval-based difficulty/forcing-sequence signals, but nothing in
+            the current filter set needs it, so it's staying deferred rather than adding
+            scope for its own sake.
+          </li>
+        </ul>
+      </section>
+
+      <hr class="section-divider" />
+
+      <!-- ── Cost Model ──────────────────────────────────────── -->
+      <section id="cost">
+        <h2>Cost Model</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Component</th><th>Rough monthly</th></tr></thead>
+            <tbody>
+              <tr><td>Lightsail container service (catalog, HTTPS + domain included)</td><td>~$10</td></tr>
+              <tr><td>Cognito</td><td>free ≤ 10k MAU</td></tr>
+              <tr><td><code>chess-users</code> (on-demand)</td><td>pennies at low volume</td></tr>
+              <tr><td><code>puzzles-ref</code> (~6M items storage + import reads)</td><td>a few $</td></tr>
+              <tr><td>API Gateway HTTP API + Lambda</td><td>~free-tier at launch volume</td></tr>
+              <tr><td>Route 53 + ACM</td><td>cents–low $</td></tr>
+              <tr><td><strong>Total</strong></td><td><strong>~$10–15/month</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          This is down from an earlier ~$40/month plan that put the read plane on Fargate
+          behind an ALB — dropping the always-on load balancer and the VPC it would have
+          needed is most of the saving. Lightsail dominates the bill; the entire write
+          plane adds only a few dollars a month on top of it at this project's actual
+          traffic volume.
+        </p>
+
+        <div style="padding-bottom: 3rem;"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <p>© 2026 Tim Hewitt</p>
+      <ul class="site-footer__links">
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn</a></li>
+        <li><a href="mailto:tim.antibes@gmail.com">Email</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <!-- Sidebar scroll-spy -->
+  <script>
+    const sections = document.querySelectorAll('.page-content section[id]');
+    const navLinks = document.querySelectorAll('#toc a');
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          navLinks.forEach(link => {
+            link.classList.toggle('active', link.getAttribute('href') === '#' + entry.target.id);
+          });
+        }
+      });
+    }, { rootMargin: '-20% 0px -70% 0px' });
+
+    sections.forEach(section => observer.observe(section));
+  </script>
+
+</body>
+</html>

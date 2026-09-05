@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Beige Chess App — Tim Hewitt</title>
+  <meta name="description" content="Beige Chess App: an ELO-bracketed, motif-filtered chess puzzle trainer on a two-plane AWS backend." />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+
+  <nav class="site-nav">
+    <div class="site-nav__inner">
+      <a href="/" class="site-nav__logo">tim hewitt</a>
+      <ul class="site-nav__links">
+        <li><a href="/#projects">Projects</a></li>
+        <li><a href="/#about">About</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn ↗</a></li>
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="container">
+
+    <header class="page-header">
+      <p class="page-header__eyebrow">iOS App · AWS Solutions Architect</p>
+      <h1 class="page-header__title">Beige Chess App</h1>
+      <p class="page-header__subtitle">
+        A chess tactics trainer with ELO-bracketed, motif-specific puzzle practice,
+        served live from a 2.95-million-puzzle Lichess dataset on a two-plane AWS backend.
+      </p>
+      <div class="tags" style="margin-top:1.25rem;">
+        <span class="tag">Cognito</span>
+        <span class="tag">Lightsail</span>
+        <span class="tag">DynamoDB</span>
+        <span class="tag">Lambda</span>
+        <span class="tag">API Gateway</span>
+        <span class="tag">Terraform</span>
+        <span class="tag">Capacitor</span>
+        <span class="tag">GitHub Actions</span>
+      </div>
+      <div style="margin-top:1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+        <a href="technical.html" class="btn btn--outline" style="font-size:0.82rem;">Technical deep-dive →</a>
+        <a href="https://puzzles.beigechessapp.com" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">Live site ↗</a>
+        <a href="https://apps.apple.com/us/app/beige/id6800103617" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">App Store ↗</a>
+      </div>
+    </header>
+
+    <section style="padding-top:2.5rem;">
+      <h2>The Problem</h2>
+      <p>
+        Lichess and Chess.com both have huge puzzle databases, but neither lets you drill
+        a specific weakness at your own level. If I keep missing discovered attacks at a
+        1700 rating, there's no way to ask either site for "200 discovered-attack puzzles
+        rated around 1700" and just work through those back to back. You get whatever the
+        algorithm serves next, tagged with Lichess's crowd-sourced themes, which are useful
+        but not something I could verify or trust the way I could trust my own analysis.
+      </p>
+      <p>
+        Beige is built around that specific gap: every puzzle is re-tagged by a pipeline I
+        wrote myself — motifs, special moves, pawn structure, game phase — derived entirely
+        from replaying the actual solution moves with <code>python-chess</code>, not from
+        Lichess's <code>Themes</code> column. Then the app lets you filter by ELO bracket and
+        motif and just play.
+      </p>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>What It Does</h2>
+      <p>
+        <strong>Rated Play</strong> serves puzzles at your current level using an
+        expected-score-scaled ELO (starting at 600, no ceiling assumed) so the rating stays
+        meaningful as you improve. <strong>Unrated Play</strong> exposes a single-select ELO
+        bracket wheel (600–3000 in 100-point steps) and a single-select motif wheel (forks,
+        pins, mates, skewers, discovered attacks) so you can drill exactly one combination —
+        "1800 elo, discovered attacks" — as many times as you want.
+      </p>
+      <p>
+        <strong>Player Insights</strong> tracks per-motif, per-phase, and per-piece
+        solve accuracy separately from the main ELO, plus a day-streak and a monthly
+        solved/attempted trend. <strong>Lichess sync</strong> links an existing Lichess
+        account and seeds your starting ELO from your real puzzle rating instead of a
+        hardcoded default. A <strong>guest mode</strong> lets anyone play with purely
+        local progress and no account at all — added specifically so an App Store reviewer
+        without a demo account could actually use the app (more on that below).
+      </p>
+      <p>
+        It shipped to the iOS App Store as <strong>Beige</strong>; Android packaging exists
+        (same Capacitor wrapper) but hasn't gone through Play Store submission yet.
+      </p>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>Architecture Overview</h2>
+      <p>
+        The app is really two very different workloads kept deliberately apart: a
+        high-volume, latency-critical <strong>read plane</strong> serving the anonymous
+        puzzle catalog, and a low-volume, spiky <strong>write plane</strong> handling
+        per-user accounts, progress, and Lichess import.
+      </p>
+      <pre>                 Capacitor app (iOS)
+                          │
+              Cognito (Apple / Google) ── JWT
+                          │
+            ┌─────────────┴─────────────┐
+      /api/puzzle/*        /api/user/*, /api/lichess/*
+       READ plane                  WRITE plane
+  ┌───────────────────┐   ┌────────────────────────────┐
+  │ Lightsail         │   │ API Gateway (HTTP)         │
+  │ container service │   │  + Cognito authorizer      │
+  │ server.py +       │   │             │              │
+  │ SQLite catalog    │   │             ▼              │
+  │ (2.95M puzzles)   │   │         Lambda ×6          │
+  └───────────────────┘   │             │              │
+                          │      ┌──────┴───────┐      │
+                          │      ▼              ▼      │
+                          │ chess-users    puzzles-ref │
+                          │   DynamoDB tables          │
+                          └────────────────────────────┘</pre>
+      <p>
+        The read plane is exactly the local prototype's <code>server.py</code> plus a SQLite
+        catalog, deployed to a Lightsail container service — no ALB, no VPC to design. The
+        write plane is API Gateway with a Cognito JWT authorizer in front of six small
+        Lambda functions, backed by two DynamoDB tables. Full reasoning for the split is in
+        the <a href="technical.html">technical deep-dive</a>.
+      </p>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>Key Design Decisions</h2>
+
+      <div class="decision">
+        <p class="decision__label">SQLite Catalog, Not DynamoDB</p>
+        <p>
+          The catalog gets filtered on multiple independent dimensions at once — ELO
+          bracket, motif, game phase, piece — then picks one match at random. That's exactly
+          what a SQL index does well and exactly what DynamoDB does badly without a
+          separate GSI per query shape. So the 2.95-million-puzzle catalog stays on SQLite,
+          queried live on every request, and DynamoDB is reserved for per-user data and a
+          reference lookup table — never the catalog itself.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Lightsail, Not Fargate + ALB</p>
+        <p>
+          The read plane was originally planned as Fargate behind an ALB. Lightsail serves
+          the same <code>server.py</code> image with HTTPS and a custom domain built in, no
+          ALB and no customer-managed VPC — cutting the always-on cost from roughly
+          $40/month down to a flat ~$10/month. If catalog traffic ever outgrows Lightsail,
+          graduating to Fargate later is still an option; it just wasn't worth the
+          complexity on day one.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Required Accounts, Plus a Guest-Mode Carve-Out</p>
+        <p>
+          Accounts are required — Cognito with Sign in with Apple and Google, no
+          guest/anonymous path in the original design — so progress syncs across devices.
+          That decision had a real cost during App Store review: with no demo account and
+          only social sign-in, a reviewer had nothing to test the app with. I added a
+          "Continue as Guest" path afterward, backed purely by local storage, specifically
+          to satisfy Apple's request for a way to review the app without an account.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Server-Authoritative ELO via Posted Events</p>
+        <p>
+          The client posts an event — "solved puzzle X, rating R, win" — and the server
+          applies the ELO delta, not the other way round. If the client computed its own
+          ELO locally, two devices could each apply the same history against a stale local
+          copy and diverge. Sending events instead of computed state is what keeps
+          cross-device sync consistent.
+        </p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">Capacitor, Not React Native</p>
+        <p>
+          The prototype was already a working vanilla HTML/JS/CSS app with a mobile-first
+          layout. Capacitor wraps that as-is for the App Store and Play Store; rewriting it
+          in React Native would have meant redoing a UI that already worked, for no real
+          gain given the app has no need for anything React Native offers that the web
+          stack didn't already have.
+        </p>
+      </div>
+    </section>
+
+    <section style="padding-top:2rem;">
+      <h2>How It Was Built</h2>
+      <p>
+        The build order followed the data dependencies: nothing about accounts, sync, or
+        mobile packaging mattered until the puzzle data itself existed and was trustworthy.
+      </p>
+
+      <div class="decision">
+        <p class="decision__label">1 · Data Pipeline</p>
+        <p>Filtered and tagged the full Lichess puzzle CSV with a Python pipeline built on <code>python-chess</code> FEN/move replay — motifs, special moves, pawn structure, and game phase all derived from what the solution sequence itself does, never a generic board scan and never Lichess's own crowd tags.</p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">2 · Local Prototype</p>
+        <p><code>server.py</code> (Python stdlib only) serving a small JSON API backed by live, parameterized SQL against a local SQLite build of the tagged dataset, plus a vanilla JS/HTML/CSS frontend with no framework and no bundler.</p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">3 · Identity &amp; Write Plane</p>
+        <p>Cognito user pool with Apple/Google federation, two DynamoDB tables, and Lambda functions behind an API Gateway HTTP API with a Cognito JWT authorizer — validated locally against DynamoDB Local before any of it touched real AWS.</p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">4 · Terraform &amp; Environments</p>
+        <p>The whole stack as one root module with dev/prod workspaces, remote state in S3 with native lockfile locking, and a Makefile that refuses to apply against the unnamed default workspace.</p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">5 · CI/CD Pipeline</p>
+        <p>GitHub Actions with OIDC-assumed roles (no long-lived AWS keys as secrets), five required PR checks, and an auto-deploy workflow that rebuilds the container, applies Terraform, and runs a live smoke test against the real deployed site after every merge to main.</p>
+      </div>
+
+      <div class="decision">
+        <p class="decision__label">6 · Mobile Packaging &amp; Submission</p>
+        <p>Wrapped the same frontend with Capacitor for iOS and Android, worked through Apple's Distribution signing and App Review requirements (including a rejection over reviewer access, which is what guest mode exists to fix), and shipped to the App Store.</p>
+      </div>
+    </section>
+
+    <section style="padding: 2.5rem 0 4rem;">
+      <hr class="section-divider" />
+      <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+        <a href="technical.html" class="btn btn--primary">Technical deep-dive →</a>
+        <a href="https://apps.apple.com/us/app/beige/id6800103617" class="btn btn--outline" target="_blank" rel="noopener">App Store ↗</a>
+        <a href="https://puzzles.beigechessapp.com" class="btn btn--outline" target="_blank" rel="noopener">Live site ↗</a>
+        <a href="/" class="btn btn--outline">← All projects</a>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <p>© 2026 Tim Hewitt</p>
+      <ul class="site-footer__links">
+        <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub</a></li>
+        <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn</a></li>
+        <li><a href="mailto:tim.antibes@gmail.com">Email</a></li>
+      </ul>
+    </div>
+  </footer>
+
+</body>
+</html>
