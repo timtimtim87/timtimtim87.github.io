@@ -32,7 +32,7 @@
       </p>
       <div style="margin-top:1rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
         <a href="index.html" class="btn btn--outline" style="font-size:0.82rem;">← Project overview</a>
-        <a href="https://github.com/timtimtim87/CHESSCHAT_V2" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">GitHub ↗</a>
+        <a href="https://github.com/timtimtim87/aws-project-chesschat" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">GitHub ↗</a>
       </div>
     </header>
   </div>
@@ -343,7 +343,14 @@ terraform {
           GitHub's OIDC provider is trusted by an IAM role, and the workflow assumes that role
           for the duration of the pipeline run.
         </p>
-        <p>Deploy pipeline steps on push to <code>main</code> (single job, sequential):</p>
+        <p>
+          The deploy workflow is <code>workflow_dispatch</code> — manually triggered, not fired on
+          push to <code>main</code>. That was deliberate: this stack costs real money to run and
+          a single operator was making every change, so I wanted to decide when the running
+          environment moved. On a team I would auto-deploy to staging on merge and keep the
+          manual gate only in front of production.
+        </p>
+        <p>Deploy pipeline steps (single job, sequential):</p>
         <ol>
           <li>Checkout source</li>
           <li>Configure AWS credentials via OIDC</li>
@@ -887,7 +894,7 @@ Room consumed — code is single-use</pre>
         <p>
           The March bill came to <strong>$212.25</strong> (pre-tax) at near-zero actual usage.
           Almost the entire cost is fixed always-on infrastructure — the variable components
-          (compute, data transfer, Chime) were negligible, whuhc makes sense as I was the onyl person using it.
+          (compute, data transfer, Chime) were negligible, which makes sense as I was the only person using it.
         </p>
         <div class="table-wrap">
           <table>
@@ -947,7 +954,7 @@ Room consumed — code is single-use</pre>
 
   <footer class="site-footer">
     <div class="site-footer__inner">
-      <p>© 2025 Tim Hewitt</p>
+      <p>© 2026 Tim Hewitt</p>
       <ul class="site-footer__links">
         <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub</a></li>
         <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn</a></li>

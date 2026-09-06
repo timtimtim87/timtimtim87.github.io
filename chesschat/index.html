@@ -42,9 +42,24 @@
       </div>
       <div style="margin-top:1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
         <a href="technical.html" class="btn btn--outline" style="font-size:0.82rem;">Technical deep-dive →</a>
-        <a href="https://github.com/timtimtim87/CHESSCHAT_V2" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">GitHub ↗</a>
+        <a href="https://github.com/timtimtim87/aws-project-chesschat" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">GitHub ↗</a>
       </div>
     </header>
+
+    <div class="callout callout--info" style="margin-top:2rem;">
+      <p style="margin:0;">
+        <strong>The environment is no longer deployed.</strong> <code>chess-chat.com</code> and
+        <code>app.chess-chat.com</code> do not resolve — I tore the stack down after running the
+        cost exercise below. The March bill was <strong>$212.25</strong>, and roughly $163 of that
+        was fixed always-on infrastructure billing at near-zero usage: NAT Gateway, VPC interface
+        endpoints, ALB, and a Redis replica, none of which get cheaper when nobody is playing.
+        Leaving it running to have a live link was not worth that. The demo video below shows the
+        working product, the
+        <a href="https://github.com/timtimtim87/aws-project-chesschat" target="_blank" rel="noopener">repository</a>
+        holds the full Terraform, and the
+        <a href="technical.html#cost">cost model</a> itemises where every dollar went.
+      </p>
+    </div>
 
     <section style="padding-top:2.5rem;">
       <h2>What It Is</h2>
@@ -62,9 +77,9 @@
 
     <section style="padding-top:2rem;">
       <p>
-        The app requires a range of functionality, and below is an image showing the logic
-        flow of different areas of the application. I'm still learning how best to create
-        diagrams, but separating each flow felt like an easier-to-read reference. In the future, I would have each flow diagram separately as the quality of this large image is low.
+        The diagram below shows the logic flow across each area of the application — room
+        creation, the video session, chess gameplay, and session teardown — separated per flow
+        rather than combined into one graph.
       </p>
     </section>
 
@@ -129,7 +144,7 @@ Static landing / auth       Authenticated gameplay runtime
       <h2>Key Design Decisions</h2>
       <p>
         Each of these was a deliberate tradeoff, documented in Architecture Decision Records
-        in the <a href="https://github.com/timtimtim87/CHESSCHAT_V2" target="_blank" rel="noopener">repo</a>.
+        in the <a href="https://github.com/timtimtim87/aws-project-chesschat" target="_blank" rel="noopener">repo</a>.
       </p>
 
       <h3>Split-Host Architecture</h3>
@@ -198,7 +213,7 @@ Static landing / auth       Authenticated gameplay runtime
 
       <div class="decision">
         <p class="decision__label">5 · CI/CD</p>
-        <p>GitHub Actions pipeline. A single deploy pipeline on push to main: ECR image tagged by commit SHA, ECS rolling deploy, then static auth assets synced to S3 with CloudFront invalidation. Tests (backend, frontend, Terraform) run as required PR gate checks — not in the deploy pipeline. Branch protection enforces all three checks on main with no admin bypass.</p>
+        <p>GitHub Actions pipeline. Tests (backend, frontend, Terraform) run as required PR gate checks; branch protection enforces all three on main with no admin bypass. Deployment is a separate, manually triggered workflow (<code>workflow_dispatch</code>): ECR image tagged by commit SHA, ECS rolling deploy, then static auth assets synced to S3 with CloudFront invalidation. Keeping deploys manual was deliberate for a single-operator project on paid always-on infrastructure — I wanted to choose when the bill-generating stack changed. On a team, this would be auto-deploy to a staging environment with a manual gate to production.</p>
       </div>
 
       <div class="decision">
@@ -217,7 +232,7 @@ Static landing / auth       Authenticated gameplay runtime
       <hr class="section-divider" />
       <div style="display:flex; gap:1rem; flex-wrap:wrap;">
         <a href="technical.html" class="btn btn--primary">Technical deep-dive →</a>
-        <a href="https://github.com/timtimtim87/CHESSCHAT_V2" class="btn btn--outline" target="_blank" rel="noopener">View on GitHub ↗</a>
+        <a href="https://github.com/timtimtim87/aws-project-chesschat" class="btn btn--outline" target="_blank" rel="noopener">View on GitHub ↗</a>
         <a href="/" class="btn btn--outline">← All projects</a>
       </div>
     </section>
@@ -226,7 +241,7 @@ Static landing / auth       Authenticated gameplay runtime
 
   <footer class="site-footer">
     <div class="site-footer__inner">
-      <p>© 2025 Tim Hewitt</p>
+      <p>© 2026 Tim Hewitt</p>
       <ul class="site-footer__links">
         <li><a href="https://github.com/timtimtim87" target="_blank" rel="noopener">GitHub</a></li>
         <li><a href="https://www.linkedin.com/in/timtimtim87/" target="_blank" rel="noopener">LinkedIn</a></li>
