@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Tim Hewitt — CV</title>
+<style>
+  /* Static font instances live in cv/fonts/ so the build needs no network and
+     Chrome embeds real outlines rather than rasterised Type 3 glyphs. */
+  @font-face { font-family: 'DM Sans'; font-weight: 400; src: url('fonts/DMSans-Regular.ttf')  format('truetype'); }
+  @font-face { font-family: 'DM Sans'; font-weight: 500; src: url('fonts/DMSans-Medium.ttf')   format('truetype'); }
+  @font-face { font-family: 'DM Sans'; font-weight: 600; src: url('fonts/DMSans-SemiBold.ttf') format('truetype'); }
+  @font-face { font-family: 'DM Mono'; font-weight: 400; src: url('fonts/DMMono-Regular.ttf')  format('truetype'); }
+  @font-face { font-family: 'DM Mono'; font-weight: 500; src: url('fonts/DMMono-Medium.ttf')   format('truetype'); }
+
+  :root {
+    --text:       #1a1916;
+    --text-mid:   #45423c;
+    --text-muted: #6b6860;
+    --rule:       #d9d6ce;
+    --accent:     #a86d08;
+    --sans: 'DM Sans', -apple-system, sans-serif;
+    --mono: 'DM Mono', ui-monospace, monospace;
+  }
+
+  @page { size: A4; margin: 12mm 13mm; }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    font-size: 9.3pt;
+    line-height: 1.4;
+    color: var(--text-mid);
+    -webkit-font-smoothing: antialiased;
+    background: #fff;
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+
+  /* ── Header ─────────────────────────────────────────────── */
+  .name {
+    font-size: 25pt;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    color: var(--text);
+    line-height: 1;
+  }
+  .title {
+    font-family: var(--mono);
+    font-size: 8.4pt;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-top: 0.5em;
+  }
+  .contact {
+    margin-top: 0.85em;
+    font-size: 8.8pt;
+    color: var(--text-muted);
+  }
+  .contact span.sep { color: var(--rule); padding: 0 0.5em; }
+
+  header {
+    border-bottom: 2px solid var(--text);
+    padding-bottom: 0.9em;
+    margin-bottom: 1.1em;
+  }
+
+  /* ── Summary ────────────────────────────────────────────── */
+  .summary {
+    font-size: 9.5pt;
+    line-height: 1.5;
+    color: var(--text-mid);
+    margin-bottom: 1.25em;
+  }
+
+  /* ── Section headings ───────────────────────────────────── */
+  h2 {
+    font-family: var(--mono);
+    font-size: 7.8pt;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 0.35em;
+    margin-bottom: 0.75em;
+  }
+  section { margin-bottom: 1.1em; }
+
+  /* ── Entry rows ─────────────────────────────────────────── */
+  .entry { margin-bottom: 0.7em; break-inside: avoid; }
+  .entry:last-child { margin-bottom: 0; }
+
+  .entry__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1em;
+  }
+  .entry__title {
+    font-size: 9.9pt;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.005em;
+  }
+  .entry__meta {
+    font-family: var(--mono);
+    font-size: 7.8pt;
+    color: var(--text-muted);
+    text-align: right;
+    flex-shrink: 0;
+    letter-spacing: 0.02em;
+  }
+  .entry__sub {
+    font-size: 8.9pt;
+    font-style: italic;
+    color: var(--text-muted);
+    margin-top: 0.1em;
+  }
+
+  ul { list-style: none; margin-top: 0.35em; }
+  li {
+    position: relative;
+    padding-left: 0.85em;
+    margin-bottom: 0.16em;
+    line-height: 1.4;
+  }
+  li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.52em;
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: var(--rule);
+  }
+  li strong { color: var(--text); font-weight: 600; }
+
+  /* ── Competencies ───────────────────────────────────────── */
+  .comp { display: flex; gap: 0.6em; margin-bottom: 0.3em; }
+  .comp__label {
+    font-family: var(--mono);
+    font-size: 7.8pt;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    width: 74px;
+    flex-shrink: 0;
+    padding-top: 0.15em;
+  }
+  .comp__body { flex: 1; }
+
+  /* ── Certification row ──────────────────────────────────── */
+  .cert {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .cert__name { font-weight: 600; color: var(--text); font-size: 9.6pt; }
+  .cert__year { font-family: var(--mono); font-size: 7.8pt; color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="name">Tim Hewitt</div>
+  <div class="title">AWS Certified Solutions Architect &ndash; Associate</div>
+  <div class="contact">
+    Melbourne, VIC
+    <span class="sep">/</span>0450 737 104
+    <span class="sep">/</span><a href="mailto:tim.antibes@gmail.com">tim.antibes@gmail.com</a>
+    <span class="sep">/</span><a href="https://timtimtim87.github.io">timtimtim87.github.io</a>
+    <span class="sep">/</span><a href="https://www.linkedin.com/in/timtimtim87/">LinkedIn</a>
+    <span class="sep">/</span><a href="https://github.com/timtimtim87">GitHub</a>
+  </div>
+</header>
+
+<p class="summary">
+  Career changer with thirteen years in high-standards, client-facing operations, now AWS
+  certified and working in cloud infrastructure. I design, build, deploy and fund production
+  AWS systems end to end &mdash; including one shipped to the iOS App Store &mdash; and document
+  the architectural decisions, failure modes and cost tradeoffs behind each one. Seeking an
+  entry-level cloud role where technical work and client-facing work meet.
+</p>
+
+<!-- ── Competencies ─────────────────────────────────────────── -->
+<section>
+  <h2>Core Competencies</h2>
+  <div class="comp">
+    <div class="comp__label">Technical</div>
+    <div class="comp__body">
+      AWS (VPC, ECS Fargate, Lambda, DynamoDB, ElastiCache, S3, CloudFront, API Gateway,
+      Cognito, Bedrock, CloudWatch) &middot; Terraform &middot; AWS SAM &middot; GitHub Actions
+      &amp; OIDC &middot; Docker &middot; Python &middot; JavaScript / Node.js &middot; SQL
+    </div>
+  </div>
+  <div class="comp">
+    <div class="comp__label">Practice</div>
+    <div class="comp__body">
+      Architecture decision records &middot; Cloud cost analysis and optimisation &middot;
+      Technical documentation &middot; Stakeholder management &middot; Team mentorship
+      &middot; Cross-cultural communication
+    </div>
+  </div>
+</section>
+
+<!-- ── Certifications ───────────────────────────────────────── -->
+<section>
+  <h2>Certifications</h2>
+  <div class="cert">
+    <span class="cert__name">AWS Certified Solutions Architect &ndash; Associate</span>
+    <span class="cert__year">2026</span>
+  </div>
+</section>
+
+<!-- ── Projects ─────────────────────────────────────────────── -->
+<section>
+  <h2>Cloud Architecture Portfolio &nbsp;&middot;&nbsp; timtimtim87.github.io</h2>
+
+  <div class="entry">
+    <div class="entry__head">
+      <span class="entry__title">Beige &mdash; Chess Tactics Trainer (iOS, shipped)</span>
+      <span class="entry__meta">Cognito, Lightsail, Lambda, DynamoDB, Terraform</span>
+    </div>
+    <ul>
+      <li><strong>Shipped to the iOS App Store.</strong> Designed a two-plane architecture separating an anonymous, latency-critical read plane (Lightsail container serving a 2.95M-puzzle SQLite catalog) from a spiky per-user write plane (API Gateway with a Cognito JWT authorizer, six Lambdas, DynamoDB).</li>
+      <li>Built the data pipeline: re-tagged the full Lichess puzzle dataset by replaying each solution with <span style="font-family:var(--mono);font-size:8.6pt">python-chess</span> to derive motifs, pawn structure and game phase, rather than trusting crowd-sourced tags.</li>
+      <li>Chose Lightsail over Fargate + ALB after costing both, cutting always-on spend from roughly $40/month to ~$10/month with no loss of function.</li>
+      <li>Built CI/CD on GitHub OIDC (no long-lived AWS keys), five required PR checks, and auto-deploy with a live post-deploy smoke test.</li>
+      <li><strong>Diagnosed a production stale-deploy incident</strong> that silently returned empty results; root-caused it by comparing live and local API responses, then wrote the smoke test that now blocks the same regression.</li>
+    </ul>
+  </div>
+
+  <div class="entry">
+    <div class="entry__head">
+      <span class="entry__title">ChessChat &mdash; Real-Time Video Chess Platform</span>
+      <span class="entry__meta">Terraform, ECS Fargate, Redis, DynamoDB, Cognito, CloudFront</span>
+    </div>
+    <ul>
+      <li>Designed a three-tier VPC across three Availability Zones (public, private app, private data) with security groups enforcing one-directional trust from internet to ALB to Fargate to Redis.</li>
+      <li>Architected a split-host application &mdash; CloudFront + S3 for the static auth surface, ECS Fargate behind an ALB for the authenticated gameplay runtime &mdash; across a modular Terraform structure.</li>
+      <li>Solved real-time state synchronisation with Redis, using a background finalisation queue to persist each completed game to DynamoDB in exactly one write regardless of move count.</li>
+      <li>Built PR-gated CI (backend, frontend and Terraform checks required on <span style="font-family:var(--mono);font-size:8.6pt">main</span>, no admin bypass) with OIDC-authenticated deploys, plus CloudWatch alarms and eight custom application metrics.</li>
+      <li><strong>Analysed a real $212/month AWS bill</strong> and found that VPC interface endpoints bill per Availability Zone, accounting for $89 of it; documented the fixed-versus-variable cost split and shut the environment down on that basis.</li>
+    </ul>
+  </div>
+
+  <div class="entry">
+    <div class="entry__head">
+      <span class="entry__title">Automated Market Screener &amp; Trading Bot</span>
+      <span class="entry__meta">Lambda, EventBridge, API Gateway, S3, Parameter Store, AWS SAM</span>
+    </div>
+    <ul>
+      <li>Built a serverless pipeline that screens ~1,000 stocks daily against a custom strategy and delivers ranked results on demand through a Telegram bot.</li>
+      <li>Designed a cost-optimised architecture by matching each service to the actual workload &mdash; Lambda over EC2, S3 over RDS, Parameter Store over Secrets Manager &mdash; keeping the system at effectively $0/month.</li>
+      <li>Secured API credentials in Parameter Store with IAM scoped to a single parameter path, and added request-level authorisation on the bot to reject unrecognised callers.</li>
+      <li><strong>Diagnosed a silent production failure</strong> &mdash; a lapsed data subscription that let the job report success on zero records &mdash; and specified the validation and CloudWatch alarming needed to catch it.</li>
+    </ul>
+  </div>
+
+  <div class="entry">
+    <div class="entry__head">
+      <span class="entry__title">SUDOKOO &mdash; AI-Powered Sudoku Scanner</span>
+      <span class="entry__meta">Amazon Bedrock, Lambda, API Gateway, CloudFront, S3</span>
+    </div>
+    <ul>
+      <li>Built a serverless web app that photographs a printed Sudoku puzzle and turns it into a playable game, using Amazon Bedrock (Claude) for grid extraction.</li>
+      <li>Designed the architecture end to end: CloudFront + S3 with Origin Access Control for private static hosting, API Gateway and Lambda for the scan pipeline, and a backtracking solver for validation.</li>
+      <li>Measured a ~50% extraction success rate from CloudWatch log analysis, categorised the two failure modes, and identified the concrete security and reliability work a production version would need.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ── Experience ───────────────────────────────────────────── -->
+<section>
+  <h2>Professional Experience</h2>
+
+  <div class="entry">
+    <div class="entry__head">
+      <span class="entry__title">Senior Coach &amp; Staff Mentor</span>
+      <span class="entry__meta">2021 &ndash; Present</span>
+    </div>
+    <div class="entry__sub">5th Element Wellness, Melbourne</div>
+    <ul>
+      <li>Translate complex health and fitness data into actionable business strategies and personalised client progress plans.</li>
+      <li>Mentor and educate the coaching team to maintain consistent, high-quality service delivery.</li>
+      <li>Analyse membership datasets to optimise class scheduling and refine targeted advertising spend.</li>
+    </ul>
+  </div>
+
+  <div class="entry">
+    <div class="entry__head">
+      <span class="entry__title">Bosun &nbsp;/&nbsp; Deck Crew</span>
+      <span class="entry__meta">2006 &ndash; 2019</span>
+    </div>
+    <div class="entry__sub">Superyacht industry, international</div>
+    <ul>
+      <li>Thirteen years in a service environment where the client is on board: high expectations, no margin for error, and problems resolved in person and immediately.</li>
+      <li>Led deck crews in complex, high-pressure maritime operations where safety and operational precision were paramount.</li>
+      <li>Built strong cross-cultural communication skills working with international crews and guests.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ── Education ────────────────────────────────────────────── -->
+<section>
+  <h2>Education</h2>
+  <div class="cert">
+    <span class="cert__name">Guilford Young College, Tasmania</span>
+    <!-- TODO: add qualification and years, or delete this section entirely. -->
+  </div>
+</section>
+
+</body>
+</html>
