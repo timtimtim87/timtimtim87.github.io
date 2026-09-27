@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ChessChat — Technical Deep-Dive</title>
+  <title>ChessChat Technical Deep-Dive | Tim Hewitt</title>
   <meta name="description" content="ChessChat technical architecture: VPC design, IaC, data flow, DynamoDB schema, security." />
   <link rel="stylesheet" href="../styles.css" />
 </head>
@@ -110,31 +110,35 @@
                 <td>Private Data</td>
                 <td><code>10.20.96.0/20, 10.20.112.0/20, 10.20.128.0/20</code></td>
                 <td>ElastiCache Redis</td>
-                <td>None — no internet route</td>
+                <td>Outbound only via NAT Gateway (no inbound path)</td>
               </tr>
             </tbody>
           </table>
         </div>
         <p>
-          The /20 subnets provide 4,094 IP addresses for each subnet (taking away the 5 addresses
-          that AWS reserve). This is way more addresses than I will need, but there isn't really
-          any downside in this isolated project. A tighter design would use smaller CIDR blocks
-          based on the expected host count. In a shared enterprise VPC where IP address space is
-          a shared resource, I would size my subnets accordingly.
+          Each /20 subnet provides 4,091 usable IP addresses (4,096 less the 5 that AWS reserves
+          in every subnet). This is far more than the project needs, but oversizing has no
+          practical cost in an isolated VPC. A tighter design would size subnets from the expected
+          host count, and I would do that in a shared enterprise VPC where address space is
+          allocated across teams.
         </p>
 
         <h3>Why Three Tiers?</h3>
         <p>
-          It isolates my resources, which makes my application and infrastructure more secure. Security groups ensure only expected traffic is allowed at each layer. Route tables in the private tiers route 0.0.0.0/0 to a NAT Gateway rather than an Internet Gateway — NAT is outbound-only, so there is no inbound internet path to ECS tasks or Redis even if a security group rule were misconfigured.
+          Separating the tiers isolates resources by trust level. Security groups allow only
+          expected traffic at each layer. Route tables in the private tiers route
+          0.0.0.0/0 to a NAT Gateway rather than an Internet Gateway. NAT is outbound-only, so
+          there is no inbound internet path to ECS tasks or Redis even if a security group rule
+          were misconfigured.
         </p>
 
         <h3>NAT Gateway Strategy</h3>
         <p>
-          A single NAT Gateway handles outbound internet from the private app subnets.
-          This introduces a single-AZ egress dependency. If I intended to design my infrastructure with more resilience, I would have a NAT gateway in each AZ.
-          The Terraform VPC module accepts <code>nat_gateway_mode = "single" | "per_az"</code>
-          so switching to per-AZ NAT requires one
-          small change.
+          A single NAT Gateway handles outbound internet traffic from the private subnets.
+          This creates a dependency on one AZ for egress. For higher resilience I would run a
+          NAT Gateway in each AZ. The Terraform VPC module accepts
+          <code>nat_gateway_mode = "single" | "per_az"</code>, so switching to per-AZ NAT is a
+          one-line change.
         </p>
       </section>
 
@@ -143,7 +147,7 @@
 <section id="security-groups">
   <h2>Security Groups</h2>
   <p>
-    Security groups enforce a strict one-directional trust chain. Each layer
+    Security groups enforce a one-directional chain of trust. Each layer
     only accepts traffic from the layer directly above it.
   </p>
   <pre>Internet (0.0.0.0/0)
@@ -159,8 +163,8 @@ Redis Security Group</pre>
   <p>
     The Redis rule references the Fargate task <strong>security group ID</strong>
     rather than a CIDR block. Since Fargate tasks are ephemeral and get random
-    IPs, any new task automatically gets access just by being a member of that
-    security group — no IP management needed as tasks scale.
+    IPs, any new task gets access automatically by being a member of that
+    security group, so no IP management is needed as tasks scale.
   </p>
 
 </section>
@@ -172,8 +176,8 @@ Redis Security Group</pre>
         <h2>VPC Endpoints</h2>
         <p>
           AWS API calls from Fargate tasks route through VPC Endpoints rather than the NAT
-          Gateway. This eliminates NAT data processing charges on ECR image pulls, CloudWatch
-          log writes, and Secrets Manager reads — and keeps traffic inside the AWS network.
+          Gateway. This avoids NAT data processing charges on ECR image pulls, CloudWatch
+          log writes and Secrets Manager reads, and keeps that traffic inside the AWS network.
         </p>
         <div class="table-wrap">
           <table>
@@ -181,19 +185,19 @@ Redis Security Group</pre>
             <tbody>
               <tr><td>S3</td><td>Gateway</td><td>Free</td><td>ECR image layer storage, static assets</td></tr>
               <tr><td>DynamoDB</td><td>Gateway</td><td>Free</td><td>Database access from app tier</td></tr>
-              <tr><td>ECR API</td><td>Interface</td><td>~$7/mo</td><td>Container image metadata</td></tr>
-              <tr><td>ECR Docker</td><td>Interface</td><td>~$7/mo</td><td>Container image pull</td></tr>
-              <tr><td>CloudWatch Logs</td><td>Interface</td><td>~$7/mo</td><td>Application log delivery</td></tr>
-              <tr><td>Secrets Manager</td><td>Interface</td><td>~$7/mo</td><td>Redis auth token at task startup</td></tr>
+              <tr><td>ECR API</td><td>Interface</td><td>~$7/mo per AZ</td><td>Container image metadata</td></tr>
+              <tr><td>ECR Docker</td><td>Interface</td><td>~$7/mo per AZ</td><td>Container image pull</td></tr>
+              <tr><td>CloudWatch Logs</td><td>Interface</td><td>~$7/mo per AZ</td><td>Application log delivery</td></tr>
+              <tr><td>Secrets Manager</td><td>Interface</td><td>~$7/mo per AZ</td><td>Redis auth token at task startup</td></tr>
             </tbody>
           </table>
         </div>
         <p>
           VPC endpoints could reduce NAT Gateway usage for AWS service traffic such as ECR
           pulls, CloudWatch Logs, Secrets Manager, S3, and DynamoDB. Gateway endpoints for
-          S3 and DynamoDB are free, but other interface endpoints have their own
-          hourly and per-GB costs — so whether they save money depends on AZ count, endpoint
-          count, and actual traffic volume. More on this in my cost breakdown.
+          S3 and DynamoDB are free, but interface endpoints have their own hourly and per-GB
+          costs, so whether they save money depends on AZ count, endpoint count and actual
+          traffic volume. The cost model below covers this in detail.
         </p>
       </section>
 
@@ -203,8 +207,8 @@ Redis Security Group</pre>
       <section id="terraform-structure">
         <h2>Terraform Structure</h2>
         <p>
-          All infrastructure is defined in Terraform with a modular structure — one module
-          per AWS service boundary. The root <code>main.tf</code> wires modules together,
+          All infrastructure is defined in Terraform, with one module per AWS service
+          boundary. The root <code>main.tf</code> wires modules together,
           passing outputs as inputs (e.g. VPC subnet IDs feed into ECS and ElastiCache).
         </p>
         <pre>terraform/
@@ -227,14 +231,13 @@ Redis Security Group</pre>
 └── versions.tf       # Provider version pins</pre>
 
         <div class="callout">
-          <strong>Redis and ECS look dependent on each other according to the modules, but it's not
-          a cycle dependency problem.</strong> Terraform's dependency graph is built per-resource,
-          not per-module. Here, the Redis security group's ingress rule needs the ECS security
-          group's ID, and the ECS task definition needs the Redis auth-token secret's ARN. But the
-          security group itself and the secret itself are independent resources, so Terraform
-          creates both of those first. Only after that does it create the ingress rule and the task
-          definition — followed by the actual Fargate service and Redis replication group each
-          module exists for.
+          <strong>The Redis and ECS modules appear to depend on each other, but this does not
+          create a dependency cycle.</strong> Terraform builds its dependency graph per resource
+          rather than per module. The Redis security group's ingress rule needs the ECS security
+          group's ID, and the ECS task definition needs the ARN of the Redis auth-token secret.
+          The security group and the secret are themselves independent resources, so Terraform
+          creates both of them first. It then creates the ingress rule and the task definition,
+          followed by the Fargate service and the Redis replication group.
         </div>
 
         <h3>Module Outputs as Inputs</h3>
@@ -302,8 +305,8 @@ module "elasticache" {
           The Redis hostname itself isn't wired through Terraform this way. <code>REDIS_HOST</code>
           in <code>terraform.tfvars.example</code> is a plain string variable, pasted in manually
           after the first <code>elasticache</code> apply once the primary endpoint exists. The only
-          coupling Terraform resolves automatically is the security-group ID and the auth-token
-          secret ARN — both cheap enough to sit on either side of the graph without a real cycle.
+          coupling Terraform resolves automatically is the security group ID and the auth-token
+          secret ARN, and neither of these creates a cycle.
         </p>
       </section>
 
@@ -338,17 +341,16 @@ terraform {
       <section id="cicd">
         <h2>CI/CD Pipeline</h2>
         <p>
-          GitHub Actions handles continuous deployment. Authentication to AWS uses OIDC
-          (OpenID Connect).
-          GitHub's OIDC provider is trusted by an IAM role, and the workflow assumes that role
-          for the duration of the pipeline run.
+          GitHub Actions runs the pull request checks and the deployment. Authentication to AWS
+          uses OIDC (OpenID Connect). An IAM role trusts GitHub's OIDC provider, and the workflow
+          assumes that role for the duration of the pipeline run.
         </p>
         <p>
-          The deploy workflow is <code>workflow_dispatch</code> — manually triggered, not fired on
-          push to <code>main</code>. That was deliberate: this stack costs real money to run and
-          a single operator was making every change, so I wanted to decide when the running
-          environment moved. On a team I would auto-deploy to staging on merge and keep the
-          manual gate only in front of production.
+          The deploy workflow uses <code>workflow_dispatch</code>, so it is triggered manually
+          rather than on every push to <code>main</code>. I chose this deliberately. The stack cost
+          real money to run and I was the only person making changes, so I wanted to decide when
+          the running environment changed. On a team I would auto-deploy to staging on merge and
+          keep the manual gate only in front of production.
         </p>
         <p>Deploy pipeline steps (single job, sequential):</p>
         <ol>
@@ -356,20 +358,19 @@ terraform {
           <li>Configure AWS credentials via OIDC</li>
           <li>Login to Amazon ECR</li>
           <li>Build Docker image and push to ECR (commit SHA tag + <code>main-latest</code> tag)</li>
-          <li>Generate <code>config.js</code> from GitHub Actions variables (Cognito IDs, app host, cookie config) and sync static auth assets to S3; <code>config.js</code> is uploaded with <code>Cache-Control: no-store</code> so Cognito config changes are immediately live — all other assets use a 5-minute CDN cache</li>
+          <li>Generate <code>config.js</code> from GitHub Actions variables (Cognito IDs, app host, cookie config) and sync static auth assets to S3. <code>config.js</code> is uploaded with <code>Cache-Control: no-store</code> so Cognito config changes take effect immediately, while all other assets use a 5-minute CDN cache</li>
           <li>Trigger full CloudFront invalidation (<code>/*</code>)</li>
           <li>Register new ECS task definition revision</li>
           <li>Deploy ECS service and wait for stable state</li>
           <li>Upload deployment metadata artifact</li>
         </ol>
         <p>
-          Tests are not part of the deploy pipeline. Backend quality, frontend quality, and Terraform
-          quality checks run only in PR workflows and are enforced as required status checks on
-          <code>main</code> — branch protection is configured with <code>enforce_admins = true</code>
-          and <code>required_conversation_resolution = true</code>, with force-push and deletion disabled.
-          All of this branch protection configuration is managed as Infrastructure as Code using
-          Terraform's GitHub provider, so the repository settings are version-controlled and applied
-          consistently alongside the rest of the infrastructure.
+          Tests are not part of the deploy pipeline. Backend, frontend and Terraform quality checks
+          run in PR workflows and are enforced as required status checks on <code>main</code>.
+          Branch protection is configured with <code>enforce_admins = true</code> and
+          <code>required_conversation_resolution = true</code>, with force-push and deletion
+          disabled. I applied these branch protection settings through the GitHub API. They are
+          not managed in Terraform.
         </p>
       </section>
 
@@ -377,19 +378,20 @@ terraform {
 
       <!-- ── Redis vs DynamoDB ─────────────────────────────── -->
       <section id="data-split">
-        <h2>Redis vs DynamoDB — The Split</h2>
+        <h2>Redis and DynamoDB Responsibilities</h2>
         <p>
-          The platform uses two data stores with deliberately separate responsibilities.
-          The guiding principle: <strong>Redis holds what is needed right now; DynamoDB
-          stores what needs to be remembered always.</strong> Active room metadata,
-          in-progress game state, and the WebSocket connection map all live in Redis,
-           they expire naturally when the session ends. Completed game records,
-          user profiles and stats, and the friends connections live in DynamoDB.
+          The platform uses two data stores with separate responsibilities.
+          <strong>Redis holds short-lived session state</strong>: active room metadata,
+          in-progress game state and the WebSocket connection map, all of which expire when the
+          session ends. <strong>DynamoDB holds durable records</strong>: completed games, user
+          profiles and stats, friend connections, and the persistent room code for each
+          friend pair.
         </p>
         <p>
-          Importantly, DynamoDB receives exactly <strong>one write per completed game</strong>,
-          regardless of how many moves were played. All mid-game state lives in Redis.
-          This keeps DynamoDB costs proportional to games completed, not game activity.
+          DynamoDB receives <strong>one transactional write per completed game</strong>,
+          regardless of how many moves were played, because all mid-game state stays in Redis.
+          DynamoDB costs therefore scale with the number of completed games rather than with
+          in-game activity.
         </p>
       </section>
 
@@ -399,10 +401,12 @@ terraform {
       <section id="dynamodb-schema">
         <h2>DynamoDB Schema</h2>
         <p>
-          The schema uses a <strong>multi-table design</strong> — one table per domain —
-          rather than a single-table pattern. IAM permissions, CloudWatch metrics,
-          and PITR settings are all cleaner per-table. The social domain was also added after
-          initial design; retrofitting single-table key namespacing would have been challenging, so this choice provided me with a level of freedom that I wouldn't have with a single table design. To stay as honest as possible, Claude helped design the schema based on my application requirements.
+          The schema uses a <strong>multi-table design</strong>, with one table per domain,
+          rather than a single-table pattern. IAM permissions, CloudWatch metrics and PITR
+          settings are simpler to manage per table. The social domain was also added after the
+          initial design. Retrofitting single-table key namespacing would have been difficult, so
+          separate tables gave me more room to extend the schema. To be transparent, Claude helped
+          me design the schema from my application requirements.
         </p>
 
         <h3>Users</h3>
@@ -413,7 +417,7 @@ terraform {
             <div class="schema-card__row">
               <span class="schema-badge schema-badge--pk">PK</span>
               <span class="schema-card__key">user_id (S)</span>
-              <span class="schema-card__key-note">Cognito sub — immutable UUID</span>
+              <span class="schema-card__key-note">Cognito sub (immutable UUID)</span>
             </div>
           </div>
           <div class="schema-card__section">
@@ -434,10 +438,12 @@ terraform {
         </div>
         <div class="callout">
           <strong>Why <code>user_id</code> as PK, not <code>username</code>?</strong>
-          Usernames can change. I wanted to implement a feature that utilsed chess.com OAuth integration, which would include a displacement mechanic
-          where a verified chess.com holder can claim a username held by an unverified user. However, this didn't eventuate.
-          Using an immutable Cognito sub means a username change is a single
-          <code>UpdateItem</code>, not a data migration.
+          Usernames can change. I planned a chess.com OAuth integration with a displacement
+          mechanic, where a verified chess.com account holder could claim a username held by an
+          unverified user. That feature did not eventuate. Keying on the immutable Cognito sub
+          means a username change never alters a primary key, so it is a small transactional
+          write in the users table (the user item and the username reservation items) rather
+          than a data migration.
         </div>
 
         <h3>Games</h3>
@@ -479,11 +485,10 @@ terraform {
           </div>
         </div>
         <div class="callout">
-          <strong>Why two GSIs?</strong> A player alternates colours across games.
-          To query their full history you need games where they were white AND games where
-          they were black. DynamoDB GSI partition keys map to a single attribute — two
-          GSIs with two parallel queries (merged in the application) is a
-          solution. A single GSI cannot serve both lookup directions.
+          <strong>Why two GSIs?</strong> A player alternates colours across games, so their
+          full history includes games where they were white and games where they were black. A
+          GSI partition key maps to a single attribute, so one GSI cannot serve both lookups.
+          Two GSIs, queried in parallel and merged in the application, cover both.
         </div>
 
         <h3>Social Tables</h3>
@@ -504,7 +509,7 @@ terraform {
             </div>
             <div class="schema-card__section">
               <div class="schema-card__section-label">GSIs</div>
-              <div class="schema-card__attrs">None — mirrored writes</div>
+              <div class="schema-card__attrs">None (mirrored writes)</div>
             </div>
           </div>
 
@@ -590,12 +595,14 @@ terraform {
         <p>
           Friendships are written in both directions simultaneously (A→B and B→A), so listing
           a user's friends is a single <code>Query PK=user_id</code> with no GSI required.
-          The Challenges table mirrors the two-GSI pattern from Games — a challenge involves
-          two parties and must be visible to both. The pair_rooms table stores a persistent
-          room code per friend pair: when a challenge is accepted, the backend derives a
-          deterministic <code>pair_id</code> (both user IDs sorted alphabetically and
-          concatenated) and looks up or creates the room code for that pair, so returning
-          friends always get the same room rather than a new random one each time.
+          The Challenges table uses the same two-GSI pattern as Games, because a challenge
+          involves two parties and must be visible to both. The pair_rooms table stores a
+          persistent room code per friend pair. When a player challenges a friend, or starts a
+          game with them by username from the lobby, the backend builds a deterministic
+          <code>pair_id</code> (both user IDs sorted and joined) and looks up the room code for
+          that pair. If none exists, it generates an 8-character code and writes it with a
+          conditional <code>PutItem</code>, so two concurrent requests cannot create different
+          codes for the same pair. Returning friends always get the same room code.
         </p>
       </section>
 
@@ -605,21 +612,22 @@ terraform {
       <section id="redis-schema">
         <h2>Redis Schema</h2>
         <p>
-          Redis stores ephemeral session state. All keys have a TTL and are treated as
-          disposable — Redis state loss is survivable; DynamoDB loss is not.
+          Redis stores short-lived session state. Room and connection keys have a TTL, and
+          all Redis data is treated as disposable. Losing it would end live sessions, but
+          completed games and user data are held in DynamoDB.
         </p>
         <pre>room:{room_code}          String (JSON-encoded), TTL 60min
   {
-    status,               waiting | active | teardown | terminal
-    chime_meeting_id,
-    chime_meeting_data,
+    status,               waiting | both_connected
+    terminal,             true once teardown has started
+    chime_meeting,        { meetingId, meetingData } once both players join
     participants,         per-user connection state
     active_game,          null if no game running
     games_played          array of completed game summaries
   }
 
 ws:{connection_id}        String (JSON-encoded), TTL 60min
-  { user_id, room_code, connected_at }
+  { userId, roomCode }
 
 room_expiries             Sorted Set (ZSET)
                           member: room_code, score: expiry Unix timestamp
@@ -629,22 +637,22 @@ room_reconnect_deadlines  Sorted Set (ZSET)
                           member: room_code, score: reconnect grace deadline timestamp
                           Background worker scans for elapsed grace periods
 
-game_finalization_queue   List — jobs awaiting DynamoDB write
-game_finalization_deadletter  List — jobs that failed after 5 attempts</pre>
+game_finalization_queue   List: jobs awaiting DynamoDB write
+game_finalization_deadletter  List: jobs that failed after 5 attempts</pre>
         <p>
-          Room and connection state is stored as JSON strings using <code>SET</code>/<code>GET</code>,
-          not as Redis Hashes. WebSocket connection state lives in Redis (not in Fargate task memory)
-          so that any task can look up any connection — the foundation for distributed WebSocket routing
-          when the pub/sub relay is added.
+          Room and connection state is stored as JSON strings using <code>SET</code>/<code>GET</code>
+          rather than as Redis Hashes. WebSocket connection state is kept in Redis rather than in
+          Fargate task memory, so any task can look up any connection. A Redis pub/sub relay for
+          routing messages across multiple tasks, which I did not build, would rely on this.
         </p>
         <p>
-          The two sorted sets enable a background expiry worker to reliably scan for and act on
-          expired rooms and elapsed reconnect grace periods, even when the originating WebSocket
-          connection is gone. This is more robust than relying solely on Redis key TTL, which
-          fires no callback on expiry.
+          The two sorted sets let a background worker scan for and act on expired rooms and
+          elapsed reconnect grace periods, even when the originating WebSocket connection is gone.
+          This is more reliable than relying only on Redis key TTLs, which do not trigger a
+          callback when a key expires.
         </p>
         <p>
-          The finalization queue is a Redis List used as a lightweight job queue: completed game
+          The finalisation queue is a Redis List used as a simple job queue. Completed game
           data waits there until it can be written to DynamoDB. If DynamoDB is momentarily
           unavailable, the job sits in the queue rather than being lost. Jobs that fail five times
           are parked in the dead letter list for inspection rather than retried indefinitely.
@@ -659,34 +667,34 @@ game_finalization_deadletter  List — jobs that failed after 5 attempts</pre>
 
         <h3>Room Creation</h3>
         <ol>
-          <li>User A sends a challenge to User B → WebSocket message to Fargate</li>
-          <li>Backend generates 8-char alphanumeric room code</li>
-          <li>Room written to Redis with 60-minute TTL</li>
-          <li>Room code returned to User A's browser</li>
-          <li>User B enters code → backend validates room exists</li>
-          <li>Backend creates Chime SDK meeting, generates attendee tokens for both</li>
-          <li>Meeting credentials pushed to both clients via WebSocket</li>
-          <li>Chime SDK initialises on both frontends — video active</li>
+          <li>User A challenges User B from the Friends page (REST <code>POST /api/challenges</code>) or enters User B's username in the lobby (REST <code>GET /api/rooms/pair</code>)</li>
+          <li>Backend looks up the pair's room code in the <code>pair_rooms</code> table, or creates an 8-character code if the pair has never had one. A challenge is also stored with that code, and User B is sent a notification</li>
+          <li>User A's browser opens <code>/room/{code}</code> and sends <code>join_room</code> over the WebSocket</li>
+          <li>No room exists in Redis for that code, so the backend creates one (<code>SET NX</code>, 60-minute TTL) with status <code>waiting</code></li>
+          <li>User B joins the same code (for example by entering User A's username in the lobby, which resolves to the same pair code), and the room status becomes <code>both_connected</code></li>
+          <li>Backend creates the Chime SDK meeting and an attendee for each player</li>
+          <li>Meeting and attendee details sent to both clients over the WebSocket (<code>video_ready</code>)</li>
+          <li>Chime SDK initialises on both frontends and video starts</li>
         </ol>
 
         <h3>Chess Move</h3>
         <ol>
-          <li>Player drags piece — chess.js validates move locally (UX speed)</li>
+          <li>Player drags a piece and chess.js validates the move locally, so the board responds immediately</li>
           <li>Move sent to backend via WebSocket: <code>{ move: "e2e4" }</code></li>
-          <li>Backend validates server-side with chess.js (authoritative source of truth)</li>
-          <li>Board FEN, move list, and clocks updated in Redis</li>
-          <li>Move broadcast to both clients: <code>move_made</code> event including <code>moveType</code> and <code>isCheck</code> metadata fields — the server drives the sound trigger type</li>
-          <li>Both frontends update board, clocks, and play the mapped sound cue</li>
+          <li>Backend validates the move with chess.js (the authoritative source of truth)</li>
+          <li>Board FEN, move list and clocks updated in Redis</li>
+          <li>Move broadcast to both clients as a <code>move_made</code> event that includes <code>moveType</code> and <code>isCheck</code> fields, so the server determines which sound plays</li>
+          <li>Both frontends update the board and clocks and play the matching sound cue</li>
         </ol>
 
         <h3>Game Completion</h3>
         <ol>
           <li>End condition detected (checkmate / resignation / timeout)</li>
           <li>Game metadata calculated (duration, time remaining, move count)</li>
-          <li>Finalization job pushed to Redis List (<code>game_finalization_queue</code>) — write is decoupled from the in-flight WebSocket session to survive Fargate task crashes</li>
-          <li>Background worker pops the job and writes to DynamoDB as a conditional <code>PutItem</code> (idempotent — safe to retry)</li>
-          <li>Failed writes retry with exponential backoff (base 250ms, up to 5 attempts); jobs failing all 5 attempts are pushed to <code>game_finalization_deadletter</code></li>
-          <li>User stats updated — <code>UpdateItem</code> on Users table</li>
+          <li>Finalisation job pushed to a Redis List (<code>game_finalization_queue</code>), so the write is decoupled from the in-flight WebSocket session and survives a Fargate task crash</li>
+          <li>Background worker pops the job and writes the game record to DynamoDB with a conditional put inside a <code>TransactWriteItems</code> call (idempotent, so safe to retry)</li>
+          <li>Failed writes retry with exponential backoff (base 250 ms, up to 5 attempts). Jobs that fail all 5 attempts are pushed to <code>game_finalization_deadletter</code></li>
+          <li>The same transaction updates both players' win, loss and draw counts on the Users table</li>
           <li>Active game cleared from Redis room state</li>
           <li><code>game_ended</code> event broadcast to both clients</li>
         </ol>
@@ -698,35 +706,38 @@ game_finalization_deadletter  List — jobs that failed after 5 attempts</pre>
       <section id="session-lifecycle">
         <h2>Session Lifecycle</h2>
         
-        <pre>Room created (User A)
-  │  status: waiting
+        <pre>First player joins the pair's room code
+  │  Redis room created (SET NX), status: waiting
   ▼
-User B joins
-  │  status: active — Chime meeting created
+Second player joins
+  │  status: both_connected, Chime meeting created
   ▼
 Games played (unlimited sequential games)
-  │  Each game: Redis active_game → DynamoDB via finalization queue
+  │  Each game: Redis active_game → DynamoDB via finalisation queue
   ▼
-Player disconnects
+Player disconnects during a game
   │  12-second reconnect grace (tracked in room_reconnect_deadlines ZSET)
-  │  Reconnect events carry a reconnectVersion — frontend ignores stale
+  │  Reconnect events carry a reconnectVersion. The frontend ignores
   │  updates with version ≤ last seen, preventing UI regression
-  │  If grace expires → teardown begins
+  │  If grace expires, the disconnected player forfeits and teardown begins
   ▼
-Both players leave (or grace expires)
-  │  Room transitioned to terminal: true via Redis WATCH/MULTI/EXEC (atomic)
+Both players leave, grace expires, or the 60-minute room window ends
+  │  Active game (if any) ended and queued for DynamoDB write
+  │  Room marked terminal: true via Redis WATCH/MULTI/EXEC (atomic)
   │  New join attempts rejected once terminal
-  │  Chime meeting deleted
-  │  Active game (if any) queued for DynamoDB write
   │  DEL room:{code} + ZREM from both sorted sets
+  │  Chime meeting deleted (up to 3 attempts)
   ▼
-Room consumed — code is single-use</pre>
+Room session ended. The pair keeps its code in pair_rooms,
+and the next join on that code creates a new Redis room.</pre>
         <p>
           The terminal state transition is atomic (Redis optimistic locking via
-          <code>WATCH/MULTI/EXEC</code>). The subsequent cleanup — <code>DEL</code> and
-          removal from the two sorted sets — runs as separate commands after the transition
-          is confirmed. Single-use enforcement relies on the terminal state check: new join
-          attempts are rejected once the room is terminal, before the key is deleted.
+          <code>WATCH/MULTI/EXEC</code>). The cleanup that follows (<code>DEL</code> and
+          removal from the two sorted sets) runs as separate commands after the transition
+          is confirmed, and the Chime meeting is deleted after that. Join attempts that arrive
+          while the room is terminal are rejected. Once the Redis key is deleted, the room code
+          itself is not retired: it stays in <code>pair_rooms</code>, and the next time the same
+          two players join it, the backend creates a fresh room in Redis.
         </p>
       </section>
 
@@ -736,20 +747,20 @@ Room consumed — code is single-use</pre>
       <section id="websocket">
         <h2>WebSocket Routing</h2>
         <p>
-          WebSocket connections require session affinity — a client must reach the same
+          WebSocket connections require session affinity: a client must reach the same
           Fargate task to maintain its connection. The ALB target group has sticky sessions
           enabled (<code>lb_cookie</code>, 24-hour duration).
         </p>
         <div class="callout callout--warn">
-          <strong>Current scaling constraint.</strong> WebSocket routing is single-task until
-          a Redis pub/sub message relay is implemented. At that point, any task can relay
-          messages to any other task and sticky sessions become a preference, not a requirement.
-          This constraint is documented and the upgrade path is clear.
+          <strong>Scaling limit.</strong> WebSocket routing only supports a single ECS task.
+          If I continued the project, I would add a Redis pub/sub message relay so that any
+          task could relay messages to connections held by another task. Sticky sessions would
+          then no longer be required for message delivery. This limit is documented in the
+          repository.
         </div>
         <p>
-          Connection state is stored in Redis (not task memory), so the foundation for
-          distributed routing is already in place. Implementing the pub/sub relay is the
-          remaining step.
+          Connection state is already stored in Redis rather than in task memory, so the relay
+          would build on the existing data model.
         </p>
       </section>
 
@@ -761,34 +772,38 @@ Room consumed — code is single-use</pre>
         <h3>Current: Amazon Chime SDK</h3>
         <p>
           Chime SDK provides a managed WebRTC implementation. The server creates a meeting
-          and issues attendee tokens; the client SDK handles negotiation, STUN/TURN, and
+          and issues attendee tokens, and the client SDK handles negotiation, STUN/TURN and
           media streams. Cost: <strong>$0.0017 per attendee-minute</strong>.
         </p>
         <p>
-          A 1-hour session with two players = 120 attendee-minutes = $0.20 per session.
+          A 1-hour session with two players is 120 attendee-minutes, or $0.20 per session.
         </p>
 
-        <h3>Planned: Native WebRTC + Coturn</h3>
+        <h3>Next Step If Continued: Native WebRTC and Coturn</h3>
         <p>
-          The migration replaces Chime SDK with browser-native WebRTC and a self-hosted
-          Coturn TURN server. Cost becomes a flat EC2 instance fee rather than per-minute billing.
+          If I continued the project, I would replace Chime SDK with browser-native WebRTC and a
+          self-hosted Coturn TURN server. Video cost would then be a flat EC2 instance fee
+          instead of per-minute billing.
         </p>
         <div class="table-wrap">
           <table>
             <thead><tr><th></th><th>Chime SDK</th><th>WebRTC + Coturn</th></tr></thead>
             <tbody>
               <tr><td>Cost model</td><td>$0.0017/attendee-min</td><td>Flat EC2 (~$15–30/mo)</td></tr>
-              <tr><td>Break-even</td><td>—</td><td>~150 hours/month of video</td></tr>
+              <tr><td>Break-even</td><td>n/a</td><td>~75–150 hours/month of two-person video</td></tr>
               <tr><td>Control</td><td>Managed (limited)</td><td>Full (codec, bitrate, signalling)</td></tr>
-              <tr><td>TURN required</td><td>Managed by Chime</td><td>Self-hosted (~15% of sessions)</td></tr>
+              <tr><td>TURN required</td><td>Managed by Chime</td><td>Self-hosted (industry estimate, not measured: ~15% of sessions need TURN)</td></tr>
               <tr><td>SFU needed</td><td>No (1-on-1)</td><td>No (1-on-1)</td></tr>
             </tbody>
           </table>
         </div>
         <p>
-          Migration sequence: keep Chime now → swap to WebRTC + single Coturn instance
-          pre-launch → add redundancy post-launch → add regional instances based on user
-          geography.
+          At $0.0017 per attendee-minute, a two-person session costs about $0.20 per hour, so an
+          instance costing $15–30 per month breaks even at roughly 75–150 hours of video per month.
+        </p>
+        <p>
+          The order I would follow: replace Chime with WebRTC and a single Coturn instance, then
+          add Coturn redundancy, then add regional TURN instances based on where users are.
         </p>
       </section>
 
@@ -803,14 +818,14 @@ Room consumed — code is single-use</pre>
             <tbody>
               <tr><td>Network isolation</td><td>Three-tier VPC, private subnets for app and data planes</td></tr>
               <tr><td>Least-privilege IAM</td><td>Separate task execution role (ECR/logs/secrets) and task role (DynamoDB/Redis/Chime)</td></tr>
-              <tr><td>Secrets management</td><td>Secrets Manager for Redis auth token and third-party API keys — never in env vars</td></tr>
+              <tr><td>Secrets management</td><td>Redis auth token stored in Secrets Manager and injected by ECS at task start. Never in code, the image, or plaintext in the task definition</td></tr>
               <tr><td>TLS everywhere</td><td>ACM certificates on ALB and CloudFront, HTTP → HTTPS redirect enforced</td></tr>
-              <tr><td>Container security</td><td>ECR image scanning on push, lifecycle policy (retain last 10 images)</td></tr>
+              <tr><td>Container security</td><td>ECR image scanning on push</td></tr>
               <tr><td>Encryption at rest</td><td>DynamoDB SSE (AWS-managed), Redis encryption at rest enabled</td></tr>
-              <tr><td>Auth</td><td>Cognito with email verification, password complexity, optional MFA</td></tr>
-              <tr><td>Audit</td><td>CloudTrail (all API calls), VPC Flow Logs, CloudWatch application logs</td></tr>
-              <tr><td>Static site isolation</td><td>S3 bucket private, CloudFront OAC — bucket accessible only from this distribution</td></tr>
-              <tr><td>Session cookie (v1)</td><td>JS-managed cross-subdomain cookie — accepted risk, HttpOnly migration planned (ADR-0003)</td></tr>
+              <tr><td>Auth</td><td>Cognito with email verification and password complexity rules</td></tr>
+              <tr><td>Audit</td><td>VPC Flow Logs, CloudWatch application logs</td></tr>
+              <tr><td>Static site isolation</td><td>Private S3 bucket with CloudFront OAC, so the bucket is only accessible from this distribution</td></tr>
+              <tr><td>Session cookie (v1)</td><td>JS-managed cross-subdomain cookie. Accepted risk, with an HttpOnly cookie identified as the fix (ADR-0003)</td></tr>
             </tbody>
           </table>
         </div>
@@ -820,8 +835,8 @@ Room consumed — code is single-use</pre>
           ECS uses two distinct IAM roles per task:
         </p>
         <ul>
-          <li><strong>Task Execution Role</strong> — used by the ECS agent to pull the container image from ECR, write logs to CloudWatch, and fetch secrets from Secrets Manager at startup. The application code never uses this role.</li>
-          <li><strong>Task Role</strong> — used by the application at runtime. Grants access to specific DynamoDB table ARNs, Chime SDK meeting operations, and ElastiCache describe operations. No wildcard resources.</li>
+          <li><strong>Task Execution Role</strong>: used by the ECS agent to pull the container image from ECR, write logs to CloudWatch, and fetch secrets from Secrets Manager at startup. The application code never uses this role.</li>
+          <li><strong>Task Role</strong>: used by the application at runtime. Grants access to specific DynamoDB table ARNs, Chime SDK meeting operations, and ElastiCache describe operations. No wildcard resources.</li>
         </ul>
       </section>
 
@@ -833,9 +848,9 @@ Room consumed — code is single-use</pre>
         <h3>Infrastructure Alarms</h3>
         <p>
           All alarms are CloudWatch Alarms, configured in Terraform's <code>monitoring/</code>
-          module and routed to an SNS topic for email notification. They cover the four
-          infrastructure components that could silently degrade the platform — compute,
-          load balancing, the database, and cost.
+          module and routed to an SNS topic for email notification. They cover compute, load
+          balancing, the data stores and cost, which are the areas where the platform could
+          degrade without an obvious error.
         </p>
         <div class="table-wrap">
           <table>
@@ -844,7 +859,7 @@ Room consumed — code is single-use</pre>
               <tr><td>ECS CPU utilisation</td><td>≥ 75%</td><td>1 × 5-min period</td></tr>
               <tr><td>ECS memory utilisation</td><td>≥ 80%</td><td>1 × 5-min period</td></tr>
               <tr><td>ALB 5xx errors</td><td>≥ 5 in period</td><td>1 × 5-min period</td></tr>
-              <tr><td>ALB unhealthy targets</td><td>&gt; 0</td><td>2 × 5-min periods (10 min effective); treat_missing_data = breaching — catches scale-to-zero</td></tr>
+              <tr><td>ALB unhealthy targets</td><td>&gt; 0</td><td>2 × 5-min periods (10 min effective). treat_missing_data = breaching, which catches scale-to-zero</td></tr>
               <tr><td>ALB healthy hosts low</td><td>HealthyHostCount &lt; 1</td><td>treat_missing_data = breaching</td></tr>
               <tr><td>DynamoDB throttled requests</td><td>Any</td><td>Warning</td></tr>
               <tr><td>Redis CPU</td><td>≥ 75%</td><td>2 × 5-min periods</td></tr>
@@ -855,8 +870,8 @@ Room consumed — code is single-use</pre>
 
         <h3>Application Metrics</h3>
         <p>
-          8 custom metrics are emitted to CloudWatch in the <code>Chesschat/Dev</code> namespace
-          from the backend service (<code>src/services/metrics.js</code>):
+          The backend service emits 8 custom application metrics to CloudWatch in the
+          <code>Chesschat/Dev</code> namespace (<code>src/services/metrics.js</code>):
         </p>
         <ul>
           <li><code>WsConnectionsOpened</code> / <code>WsConnectionsClosed</code></li>
@@ -866,8 +881,8 @@ Room consumed — code is single-use</pre>
         </ul>
         <p>
           These appear alongside infrastructure metrics on the CloudWatch operations dashboard.
-          The three <code>GamePersist*</code> metrics track the finalization worker's reliability
-          in real time — retries and dead-letters are immediately visible without log parsing.
+          The three <code>GamePersist*</code> metrics track the finalisation worker, so retries
+          and failed writes are visible without parsing logs.
         </p>
 
         <h3>Logging</h3>
@@ -877,12 +892,11 @@ Room consumed — code is single-use</pre>
           with the same retention.
         </p>
         <p>
-          Every HTTP request is assigned an <code>x-correlation-id</code> — either the
-          client-supplied value or a generated UUID — which is logged alongside method, path,
-          status, and latency. WebSocket sessions are traced the same way using a
-          <code>sessionId</code> and <code>connectionId</code>. When an alarm fires, the
-          correlation ID is the starting point: find the matching log entries and trace the
-          request end to end.
+          Every HTTP request is assigned an <code>x-correlation-id</code> (the client-supplied
+          value or a generated UUID), which is logged with the method, path, status and latency.
+          WebSocket sessions are traced the same way using a <code>sessionId</code> and
+          <code>connectionId</code>. When an alarm fires, I start from the correlation ID, find
+          the matching log entries and trace the request end to end.
         </p>
       </section>
 
@@ -893,57 +907,63 @@ Room consumed — code is single-use</pre>
         <h2>Cost Model</h2>
         <p>
           The March bill came to <strong>$212.25</strong> (pre-tax) at near-zero actual usage.
-          Almost the entire cost is fixed always-on infrastructure — the variable components
-          (compute, data transfer, Chime) were negligible, which makes sense as I was the only person using it.
+          Almost all of it was fixed, always-on infrastructure. The variable components (compute,
+          data transfer and Chime) were negligible, as I was the only person using the platform.
         </p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Service</th><th>March actual</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td>VPC Interface Endpoints</td><td>$89.28</td><td>4 endpoints × 3 AZs = 12 endpoint-hours/hr — per-AZ pricing</td></tr>
-              <tr><td>NAT Gateway</td><td>$33.48</td><td>Hourly charge only — 0.025 GB data processed</td></tr>
+              <tr><td>VPC Interface Endpoints</td><td>$89.28</td><td>4 endpoints × 3 AZs = 12 endpoint-hours per hour (per-AZ pricing)</td></tr>
+              <tr><td>NAT Gateway</td><td>$33.48</td><td>Hourly charge only (0.025 GB data processed)</td></tr>
               <tr><td>ElastiCache Redis</td><td>$23.81</td><td>1 primary + 1 replica, t4g.micro</td></tr>
-              <tr><td>ALB</td><td>$16.71</td><td>Fixed hourly — negligible LCU usage</td></tr>
+              <tr><td>ALB</td><td>$16.71</td><td>Fixed hourly charge, negligible LCU usage</td></tr>
               <tr><td>Domain registrar</td><td>$15.00</td><td>Annual fee</td></tr>
-              <tr><td>Public IPv4 addresses</td><td>$14.85</td><td>$0.005/hr per in-use address — AWS 2024 pricing change</td></tr>
+              <tr><td>Public IPv4 addresses</td><td>$14.85</td><td>$0.005/hr per in-use address (AWS pricing change in 2024)</td></tr>
               <tr><td>ECS Fargate</td><td>$9.40</td><td>0.25 vCPU / 512 MiB baseline task</td></tr>
-              <tr><td>CloudWatch</td><td>$8.40</td><td>28 custom metrics at $0.30/metric</td></tr>
+              <tr><td>CloudWatch</td><td>$8.40</td><td>8 application metrics plus ECS Container Insights metrics, 28 in total at $0.30 each</td></tr>
               <tr><td>Other</td><td>$1.32</td><td>Secrets Manager, Route 53, ECR, Chime ($0.03)</td></tr>
               <tr><td><strong>Total</strong></td><td><strong>$212.25</strong></td><td>Pre-tax</td></tr>
             </tbody>
           </table>
         </div>
 
-        <h3>The Always-On Problem</h3>
+        <h3>Fixed Costs</h3>
         <p>
-          At this scale, the bill exposes a structural issue: roughly $163 of the $212 is
-          fixed cost that runs regardless of whether anyone uses the platform. The NAT Gateway
-          processed 0.025 GB of data but cost $33. The VPC endpoints processed 1.67 GB but cost
-          $89. The ALB served negligible traffic but cost $17. This is the real cost of
-          production-grade infrastructure running at development load.
+          Roughly $163 of the $212 was fixed cost that ran whether or not anyone used the
+          platform: VPC interface endpoints ($89.28), the NAT Gateway ($33.48), ElastiCache Redis
+          with a primary and a replica ($23.81) and the ALB ($16.71). The NAT Gateway processed
+          0.025 GB of data but cost $33. The VPC endpoints processed 1.67 GB but cost $89. The ALB
+          served negligible traffic but cost $17. These are the costs of the production patterns
+          the stack uses (a multi-AZ network, private subnets and managed endpoints), and they
+          apply even at development load.
         </p>
         <p>
-          The biggest surprise was the VPC Interface Endpoints. Interface endpoints are billed
-          per-AZ — each endpoint deployed across three AZs counts as three hourly charges. Four
-          endpoints across three AZs produces 12 endpoint-hours per clock hour, not 4. At low
-          data volumes, this makes interface endpoints significantly more expensive than simply
-          routing through NAT. The free Gateway endpoints (S3 and DynamoDB) are unaffected by
-          this as they have no hourly charge.
+          The biggest surprise was the VPC interface endpoints. Interface endpoints are billed
+          per AZ, so each endpoint deployed across three AZs incurs three hourly charges. Four
+          endpoints across three AZs produce 12 endpoint-hours per clock hour rather than 4. At
+          low data volumes, this makes interface endpoints much more expensive than routing the
+          same traffic through NAT. The Gateway endpoints (S3 and DynamoDB) have no hourly charge,
+          so they are not affected.
         </p>
 
-        <h3>At Scale, the Math Changes</h3>
+        <h3>Cost at Higher Usage</h3>
         <p>
           The fixed costs stay flat while variable costs grow with usage. NAT data processing
-          charges ($0.045/GB) and Fargate compute scale with real load — at meaningful traffic,
-          the always-on baseline becomes a smaller fraction of total spend. The VPC endpoints
-          also start paying for themselves: routing ECR pulls and CloudWatch log writes through
-          endpoints rather than NAT avoids data processing charges that compound quickly at scale.
-          The architecture is correctly sized for production; it is just expensive to run at
-          near-zero load.
+          charges ($0.045/GB) and Fargate compute scale with real load, so at meaningful traffic
+          the always-on baseline becomes a smaller share of total spend. The VPC endpoints also
+          start to pay for themselves at higher volumes, because routing ECR pulls and CloudWatch
+          log writes through endpoints avoids NAT data processing charges.
         </p>
         <p>
-          The WebRTC + Coturn migration eliminates Chime per-minute billing, replacing it with
-          a flat EC2 instance cost — the right trade once session volume is predictable.
+          The stack uses production patterns (a multi-AZ network, private subnets, infrastructure
+          as code and required PR checks), but it has documented limits that I would address
+          before carrying real traffic: a single NAT Gateway, a single ECS task, and WebSocket
+          routing that only supports one task.
+        </p>
+        <p>
+          Moving from Chime to WebRTC and Coturn would replace per-minute video billing with a
+          flat EC2 instance cost, which suits a steady, predictable session volume.
         </p>
 
         <div style="padding-bottom: 3rem;"></div>

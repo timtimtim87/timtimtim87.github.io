@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SUDOKOO — Tim Hewitt</title>
+  <title>SUDOKOO | Tim Hewitt</title>
   <meta name="description" content="AI-powered Sudoku web app using Amazon Bedrock. Architecture overview." />
   <link rel="stylesheet" href="../styles.css" />
 </head>
@@ -27,8 +27,8 @@
       <p class="page-header__eyebrow">AI Integration · Serverless · Web App</p>
       <h1 class="page-header__title">SUDOKOO</h1>
       <p class="page-header__subtitle">
-        "SUDOKOO" is an AI-powered web app that photographs a Sudoku puzzle and turns it into an interactive
-        game — using Amazon Bedrock with Anthropic's Claude for computer vision capabilities.
+        SUDOKOO is an AI-powered web app that takes a photo of a Sudoku puzzle and turns it into an
+        interactive game. It uses Amazon Bedrock with Anthropic's Claude to read the puzzle from the image.
       </p>
       <div class="tags" style="margin-top:1.25rem;">
         <span class="tag">Amazon Bedrock</span>
@@ -36,13 +36,15 @@
         <span class="tag">CloudFront</span>
         <span class="tag">API Gateway</span>
         <span class="tag">S3</span>
-        <span class="tag">Python</span>
+        <span class="tag">Node.js</span>
       </div>
       <div style="margin-top:1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
         <a href="technical.html" class="btn btn--outline" style="font-size:0.82rem;">Technical deep-dive →</a>
         <a href="https://github.com/timtimtim87/aws-project-sudoku" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">GitHub ↗</a>
       </div>
     </header>
+
+    <div class="callout callout--info" style="margin-top:2rem;"><p style="margin:0;"><strong>This app is no longer deployed.</strong> The code and infrastructure template are on <a href="https://github.com/timtimtim87/aws-project-sudoku" target="_blank" rel="noopener">GitHub</a>, and a rebuild would move from Node.js 18 and Claude 3.5 Sonnet to a current Lambda runtime and Claude model.</p></div>
 
     <div style="margin-top:2.5rem;">
       <img src="SUDOKOO.jpg" alt="Sudoku architecture flow diagram" style="width:100%;" />
@@ -51,22 +53,20 @@
     <section style="padding-top:2.5rem;">
       <h2>The Problem</h2>
       <p>
-        My girlfriend had a Sudoku puzzle from a newspaper clipping that she'd kept for years. She wouldn't
-        let me write on it because she wanted to finish it herself. I decided to digitalise it so
-        I could have a go at solving it. This very niche
-        problem became the starting point for this project.
+        My girlfriend had kept a Sudoku puzzle from a newspaper clipping for years. She wanted to
+        finish it herself, so I couldn't write on it. I decided to digitise it so I could try
+        solving it too, and that small problem was the starting point for this project.
       </p>
       <p>
-        Beyond solving my very unique problem, the project was an opportunity to learn how to
-        integrate AI into a real application using AWS infrastructure — specifically
-        Amazon Bedrock.
+        The project was also a chance to learn how to integrate AI into a working application on
+        AWS, specifically with Amazon Bedrock.
       </p>
     </section>
 
     <section style="padding-top:2rem;">
       <h2>Architecture Overview</h2>
       <p>
-        The system is a serverless web application that uses an API gateway and a Lambda function to send a base64-encoded image to Amazon Bedrock. Bedrock uses Claude to extract and map the sudoku puzzle from the image. The puzzle is verified as a solvable sudoku puzzle and the data is sent back to the application as a playable puzzle.
+        The system was a serverless web application. API Gateway and a Lambda function sent a base64-encoded image to Amazon Bedrock, where Claude extracted the Sudoku grid from the image. Lambda checked that the grid was a valid, solvable puzzle and returned it to the browser as a playable game.
       </p>
       <pre>User (browser)
   │  HTTPS
@@ -74,7 +74,7 @@
 CloudFront (CDN + HTTPS enforcement)
   │  Origin Access Control
   ▼
-S3 (private bucket — HTML, CSS, JS)
+S3 (private bucket: HTML, CSS, JS)
 
 Camera scan flow:
   Browser → base64 image → POST /scan-sudoku
@@ -84,7 +84,7 @@ API Gateway
   │
   ▼
 Lambda (Node.js 18.x)
-  │  InvokeModelCommand — claude-3-5-sonnet
+  │  InvokeModelCommand (claude-3-5-sonnet)
   ▼
 Amazon Bedrock
   │  Returns: extracted 9x9 grid (JSON)
@@ -95,8 +95,8 @@ Lambda (validates puzzle + runs backtracking solver)
 Browser (renders interactive Sudoku game)</pre>
       <p>
         The camera scan is the main input mode. The app also includes a client-side puzzle
-        generator — new games are generated in the browser with no API call required.
-        The game engine (pencil marks, keyboard navigation, move validation, a timer,
+        generator, so new games are created in the browser with no API call.
+        The game engine (pencil marks, keyboard navigation, move validation, a timer
         and conflict highlighting) runs entirely client-side and works independently
         of the AWS backend.
       </p>
@@ -109,7 +109,7 @@ Browser (renders interactive Sudoku game)</pre>
         <p class="decision__label">Decision · AI Service Selection</p>
         <p>
           <strong>Bedrock over Rekognition or a custom model.</strong> Rekognition is designed
-          for object detection and facial recognition — extracting a structured 9×9 grid with
+          for object detection and facial recognition. Extracting a structured 9×9 grid with
           cell values is not its intended use case. A custom model would require training data
           and significant upfront investment. Bedrock with Claude accepts a natural language
           prompt describing the extraction task and returns the result.
@@ -132,19 +132,19 @@ Browser (renders interactive Sudoku game)</pre>
         <p class="decision__label">Decision · CloudFront + S3 with OAC</p>
         <p>
           <strong>Private S3 bucket with Origin Access Control.</strong> The bucket policy
-          grants read access only to this specific CloudFront distribution — verified by
-          the distribution's unique ARN. Users access files only through CloudFront,
-          never directly from S3. This prevents bypassing the CDN and avoids unexpected
-          S3 data transfer charges.
+          grants read access only to this specific CloudFront distribution, identified by
+          the distribution's ARN. Users access files only through CloudFront, not directly
+          from S3. This prevents bypassing the CDN and avoids unexpected S3 data transfer
+          charges.
         </p>
       </div>
 
       <div class="decision">
         <p class="decision__label">Decision · WAF removed</p>
         <p>
-          <strong>WAF deployed then removed.</strong> AWS WAF was initially configured for
-          SQL injection, XSS, and DDoS protection. At $8/month for 3 active rules on a
-          single-user portfolio project, the cost was disproportionate.
+          <strong>WAF deployed then removed.</strong> AWS WAF was initially configured with
+          managed rules for SQL injection, XSS and the core rule set. At $8/month for 3 active
+          rules on a single-user portfolio project, the cost was disproportionate.
         </p>
       </div>
     </section>
@@ -152,19 +152,19 @@ Browser (renders interactive Sudoku game)</pre>
     <section style="padding-top:2rem;">
       <h2>Honest Assessment</h2>
       <p>
-        The AI extraction works approximately 50% of the time. It worked fine on the puzzle from my girlfriend's newspaper clipping, which was the main part. The two main failure modes are... grid alignment errors (correct digits placed in adjacent cells) and character recognition errors (digits misread — most commonly 1 read as 7). Both produce an invalid puzzle, but these are all caught by the built-in puzzle validation engine, and do not get loaded into the game.
+        The AI extraction worked approximately 50% of the time. It worked on the puzzle from my girlfriend's newspaper clipping, which was the original goal. The two main failure modes were grid alignment errors (correct digits placed in adjacent cells) and character recognition errors (misread digits, most commonly 1 read as 7). The validity check rejects grids with duplicate values in a row, column or box, so those are not loaded into the game. Some misread digits can still produce a grid that passes validation but does not match the original puzzle.
       </p>
       <p>
-        For my portfolio use case, 50% is acceptable, I just wanted to learn how to integrate AI to solve this problem. For a production application, the approach would be different: Claude's structured JSON output mode would replace the current
-        free-text parsing, and a validation pipeline would reject and re-request
+        For a learning project, 50% was acceptable. My goal was to learn how to integrate AI to solve this problem. For a production application I would use tool use or structured outputs on a current Claude model instead of
+        free-text parsing, and add a validation step that rejects and re-requests
         extractions below a confidence threshold.
       </p>
       <p>
         Manual deployment through the AWS console was a deliberate choice to build deeper
-        understanding of each service's configuration options. The tradeoff was slow
-        iteration — uploading new frontend files and invalidating CloudFront manually
+        understanding of each service's configuration options. The trade-off was slow
+        iteration: uploading new frontend files and invalidating CloudFront manually
         every time became tedious. A CI/CD pipeline (GitHub Actions → S3 sync →
-        CloudFront invalidation) would be the first improvement if this project continued.
+        CloudFront invalidation) would be the first improvement if I rebuilt this project.
       </p>
     </section>
 

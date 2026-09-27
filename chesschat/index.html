@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ChessChat — Tim Hewitt</title>
+  <title>ChessChat | Tim Hewitt</title>
   <meta name="description" content="ChessChat: real-time video chess platform on AWS." />
   <link rel="stylesheet" href="../styles.css" />
 </head>
@@ -24,10 +24,10 @@
   <div class="container">
 
     <header class="page-header">
-      <p class="page-header__eyebrow">Flagship Project · AWS Solutions Architect</p>
+      <p class="page-header__eyebrow">Flagship Project</p>
       <h1 class="page-header__title">ChessChat</h1>
       <p class="page-header__subtitle">
-        Real-time video chess platform, built on production-grade AWS infrastructure.
+        Real-time video chess platform on AWS, defined in Terraform and deployed with GitHub Actions.
       </p>
       <div class="tags" style="margin-top:1.25rem;">
         <span class="tag">ECS Fargate</span>
@@ -49,12 +49,12 @@
     <div class="callout callout--info" style="margin-top:2rem;">
       <p style="margin:0;">
         <strong>The environment is no longer deployed.</strong> <code>chess-chat.com</code> and
-        <code>app.chess-chat.com</code> do not resolve — I tore the stack down after running the
+        <code>app.chess-chat.com</code> do not resolve. I tore the stack down after running the
         cost exercise below. The March bill was <strong>$212.25</strong>, and roughly $163 of that
-        was fixed always-on infrastructure billing at near-zero usage: NAT Gateway, VPC interface
-        endpoints, ALB, and a Redis replica, none of which get cheaper when nobody is playing.
-        Leaving it running to have a live link was not worth that. The demo video below shows the
-        working product, the
+        was fixed, always-on infrastructure that billed at near-zero usage: VPC interface
+        endpoints, the NAT Gateway, Redis (primary and replica) and the ALB. None of these cost
+        less when nobody is playing, so keeping a live link running was not worth the cost.
+        The demo video below shows the working product, the
         <a href="https://github.com/timtimtim87/aws-project-chesschat" target="_blank" rel="noopener">repository</a>
         holds the full Terraform, and the
         <a href="technical.html#cost">cost model</a> itemises where every dollar went.
@@ -64,22 +64,23 @@
     <section style="padding-top:2.5rem;">
       <h2>What It Is</h2>
       <p>
-        ChessChat lets two players play each other at chess over live video. There are no
-        matchmaking queues or strangers — users invite their friends to play against.
+        ChessChat lets two friends play chess against each other over live video. There is no
+        matchmaking queue and no playing against strangers. Users invite their friends to play.
       </p>
       <p>
-        The gameplay model follows <strong>video-call session semantics</strong>: both players
-        enter a video room that persists for the session, playing as many sequential chess games
-        as they want within the 1-hour room window. Each game uses a 5-minute per-player chess clock. When both players leave, the room tears down
-        automatically — no stale active rooms accumulating AWS Chime costs.
+        The gameplay model follows <strong>video-call session semantics</strong>. Both players
+        enter a video room that stays open for the session, and they can play as many sequential
+        chess games as they want within the 1-hour room window. Each game uses a 5-minute chess
+        clock per player. When both players leave, the room is torn down automatically and its
+        Chime meeting is deleted, so no attendee stays connected and billing.
       </p>
     </section>
 
     <section style="padding-top:2rem;">
       <p>
-        The diagram below shows the logic flow across each area of the application — room
-        creation, the video session, chess gameplay, and session teardown — separated per flow
-        rather than combined into one graph.
+        The diagram below shows the logic flow for each area of the application (room creation,
+        the video session, chess gameplay and session teardown) as separate flows rather than
+        one combined graph.
       </p>
     </section>
 
@@ -90,9 +91,9 @@
     <section style="padding-top:2.5rem;">
       <h2>Demo</h2>
       <p>
-        This is a functional demo of the core product — video chat and chess gameplay working together
-        in the browser. It's not an infrastructure walkthrough; the AWS architecture is covered in the
-        sections below and in the <a href="technical.html">technical deep-dive</a>.
+        This is a functional demo of the core product: video chat and chess gameplay working
+        together in the browser. It does not walk through the infrastructure. The AWS architecture
+        is covered in the sections below and in the <a href="technical.html">technical deep-dive</a>.
       </p>
       <p>
       </p>
@@ -109,11 +110,10 @@
     <section style="padding-top:2rem;">
       <h2>Architecture Overview</h2>
       <p>
-        The platform uses a <strong>split-host architecture</strong> — the static marketing and
-        auth surface (<code>chess-chat.com</code>) runs on CloudFront + S3, while the gameplay
-        runtime (<code>app.chess-chat.com</code>) runs on ECS Fargate behind an ALB. These are
-        deliberately separate delivery mechanisms with different scaling, caching, and security
-        profiles, kept intentionally apart.
+        The platform uses a <strong>split-host architecture</strong>. The static marketing and
+        auth site (<code>chess-chat.com</code>) runs on CloudFront and S3, and the gameplay
+        runtime (<code>app.chess-chat.com</code>) runs on ECS Fargate behind an ALB. I kept them
+        separate because they have different scaling, caching and security requirements.
       </p>
       <pre>chess-chat.com              app.chess-chat.com
 (CloudFront + S3)           (ALB → ECS Fargate)
@@ -130,9 +130,9 @@ Static landing / auth       Authenticated gameplay runtime
       <p>
         The underlying network is a <strong>three-tier VPC</strong> across three Availability
         Zones in <code>us-east-1</code>. Public subnets host the ALB and NAT Gateway. Private
-        app subnets host Fargate tasks with no public IPs. Private data subnets host Redis
-        with zero internet access. Security groups enforce one-directional trust at every layer:
-        internet → ALB → Fargate → Redis.
+        app subnets host Fargate tasks with no public IPs. Private data subnets host Redis, with
+        no inbound path from the internet. Security groups only allow traffic in one direction
+        at each layer: internet → ALB → Fargate → Redis.
       </p>
     </section>
 
@@ -143,48 +143,57 @@ Static landing / auth       Authenticated gameplay runtime
     <section style="padding-top:2rem;">
       <h2>Key Design Decisions</h2>
       <p>
-        Each of these was a deliberate tradeoff, documented in Architecture Decision Records
+        Each of these was a deliberate trade-off, documented in Architecture Decision Records
         in the <a href="https://github.com/timtimtim87/aws-project-chesschat" target="_blank" rel="noopener">repo</a>.
       </p>
 
       <h3>Split-Host Architecture</h3>
       <p>
-        The static marketing and auth surface runs on CloudFront + S3, while the gameplay
-        runtime runs on ECS Fargate behind an ALB. Keeping them separate means independent
-        deployment pipelines and the ALB only handles authenticated gameplay traffic.
+        The static marketing and auth site runs on CloudFront and S3, and the gameplay runtime
+        runs on ECS Fargate behind an ALB. The static site is cached at the CloudFront edge and
+        needs no compute, while the gameplay runtime runs as containers on ECS. Keeping them
+        apart also means the ALB only handles authenticated gameplay traffic. Both are deployed
+        by the same manually triggered GitHub Actions workflow.
       </p>
 
       <h3>Single NAT Gateway</h3>
       <p>
-        The VPC spans three AZs but outbound traffic routes through one NAT Gateway. So, if that AZ goes down, I have no other pathways for outbound traffic. This does save money though, a NAT gateway is about $35 per month. The Terraform VPC module accepts a
-        <code>nat_gateway_mode</code> variable, so switching to per-AZ NAT is a one-variable
-        change, not a network redesign.
+        The VPC spans three AZs, but outbound traffic routes through one NAT Gateway. If that AZ
+        fails, the private subnets lose outbound internet access. I accepted this to save money,
+        as each NAT Gateway costs about $35 per month. The Terraform VPC module accepts a
+        <code>nat_gateway_mode</code> variable, so switching to one NAT Gateway per AZ is a
+        single variable change rather than a network redesign.
       </p>
 
       <h3>Video Chat Room Lifecycle</h3>
       <p>
-        Rooms exist only during live participation. A 12-second reconnect grace handles
-        accidental disconnects without triggering teardown. Both participants need to join the "video chat" for Chime to actually start the video chat. Unique room codes exist for all friend pairs, meaning that the room codes are not randomly assigned per room creation, but are locked to the pair of players that played against each other, and will be re-used, when they chose to play again.
+        Rooms exist only while players are connected. A 12-second reconnect grace period
+        handles accidental disconnects without triggering teardown. The Chime meeting is only
+        created once both players have joined the room. Room codes are not generated per
+        session. Each friend pair has one persistent room code, stored in DynamoDB, which is
+        reused whenever the two players choose to play again.
       </p>
 
-      <h3>Redis + DynamoDB Split</h3>
+      <h3>Redis and DynamoDB</h3>
       <p>
-        Active room and game state is real time data, and therefore lives in Redis. After a game has been played, the cached game data is written to DynamoDB. DynamoDB receives exactly
-        one write per completed game, regardless of how many moves were played.
+        Active room and game state is real-time data, so it lives in Redis. When a game
+        finishes, its data is written to DynamoDB. DynamoDB receives one transactional write per
+        completed game, regardless of how many moves were played.
       </p>
 
-      <h3>Chime SDK → WebRTC Migration</h3>
+      <h3>Video: Chime SDK and WebRTC</h3>
       <p>
-        Chime SDK provided a fast path to working video. Plus, I wanted to learn more about this AWS service. The planned migration to native
-        browser WebRTC with a self-hosted Coturn server eliminates per-minute billing in favour
-        of consistent EC2 compute costs.
+        Chime SDK gave me a fast path to working video, and I also wanted to learn the service.
+        If I continued the project, I would move to native browser WebRTC with a self-hosted
+        Coturn server, which replaces per-minute billing with a fixed EC2 cost.
       </p>
     </section>
 
     <section style="padding-top:2rem;">
       <h2>How It Was Built</h2>
       <p>
-        The build was designed in a way that that made sense, because some services rely on other services existing already. Basically, each build layer unlocks the next set of services to build. The
+        I built the platform in dependency order, because some services rely on others already
+        existing. Each layer made the next set of services possible. The
         VPC and networking had to exist before any compute could be placed inside it. ECS and
         the container environment came next, since the application itself runs there. The chess
         engine and game logic were built on top of that working compute layer, and the video
@@ -193,7 +202,7 @@ Static landing / auth       Authenticated gameplay runtime
 
       <div class="decision">
         <p class="decision__label">1 · VPC &amp; Networking</p>
-        <p>Three-tier VPC across three AZs — public, private app, and private data subnets. Route tables, security groups, NAT gateway, VPC endpoints for ECR, CloudWatch, Secrets Manager, and DynamoDB.</p>
+        <p>Three-tier VPC across three AZs, with public, private app and private data subnets. Route tables, security groups, a NAT Gateway, and VPC endpoints for ECR, CloudWatch, Secrets Manager and DynamoDB.</p>
       </div>
 
       <div class="decision">
@@ -203,7 +212,7 @@ Static landing / auth       Authenticated gameplay runtime
 
       <div class="decision">
         <p class="decision__label">3 · Auth</p>
-        <p>Cognito user pool with email/password and Google OAuth. The auth surface (chess-chat.com) is a custom single-page website. It handles login & signup, email verification, forgot password, OAuth callback, and session handoff. JWT tokens used for both REST and WebSocket authentication.</p>
+        <p>Cognito user pool with email/password and Google OAuth. The auth surface (chess-chat.com) is a custom single-page website. It handles login and signup, email verification, password reset, the OAuth callback and session handoff. JWT tokens are used for both REST and WebSocket authentication.</p>
       </div>
 
       <div class="decision">
@@ -213,17 +222,17 @@ Static landing / auth       Authenticated gameplay runtime
 
       <div class="decision">
         <p class="decision__label">5 · CI/CD</p>
-        <p>GitHub Actions pipeline. Tests (backend, frontend, Terraform) run as required PR gate checks; branch protection enforces all three on main with no admin bypass. Deployment is a separate, manually triggered workflow (<code>workflow_dispatch</code>): ECR image tagged by commit SHA, ECS rolling deploy, then static auth assets synced to S3 with CloudFront invalidation. Keeping deploys manual was deliberate for a single-operator project on paid always-on infrastructure — I wanted to choose when the bill-generating stack changed. On a team, this would be auto-deploy to a staging environment with a manual gate to production.</p>
+        <p>GitHub Actions pipeline. Tests (backend, frontend, Terraform) run as required PR checks, and branch protection enforces all three on main with no admin bypass. Deployment is a separate, manually triggered workflow (<code>workflow_dispatch</code>): ECR image tagged by commit SHA, ECS rolling deploy, then static auth assets synced to S3 with CloudFront invalidation. I kept deploys manual deliberately. I was the only operator and the infrastructure was paid and always on, so I wanted to choose when the running stack changed. On a team, I would auto-deploy to a staging environment and keep a manual gate in front of production.</p>
       </div>
 
       <div class="decision">
         <p class="decision__label">6 · Chess Engine</p>
-        <p>WebSocket server handling room creation, game state, and real-time move broadcast. Client-side validation with chess.js; server-side validation with chess.js as the authoritative source of truth.</p>
+        <p>WebSocket server handling room creation, game state and real-time move broadcast. Moves are validated client-side with chess.js and again server-side with chess.js, which is the authoritative source of truth.</p>
       </div>
 
       <div class="decision">
         <p class="decision__label">7 · Video</p>
-        <p>Chime SDK integration for managed WebRTC. The server creates a meeting on room activation and issues attendee tokens to both players. Video runs independently of the chess session — a disconnect from one does not affect the other.</p>
+        <p>Chime SDK integration for managed WebRTC. The server creates a meeting on room activation and issues attendee tokens to both players. Video runs independently of the chess session, so a disconnect from one does not affect the other.</p>
       </div>
 
     </section>

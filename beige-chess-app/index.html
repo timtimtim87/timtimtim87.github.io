@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Beige Chess App — Tim Hewitt</title>
+  <title>Beige Chess App | Tim Hewitt</title>
   <meta name="description" content="Beige Chess App: an ELO-bracketed, motif-filtered chess puzzle trainer on a two-plane AWS backend." />
   <link rel="stylesheet" href="../styles.css" />
 </head>
@@ -24,7 +24,7 @@
   <div class="container">
 
     <header class="page-header">
-      <p class="page-header__eyebrow">iOS App · AWS Solutions Architect</p>
+      <p class="page-header__eyebrow">iOS App · Data Pipeline</p>
       <h1 class="page-header__title">Beige Chess App</h1>
       <p class="page-header__subtitle">
         A chess tactics trainer with ELO-bracketed, motif-specific puzzle practice,
@@ -46,30 +46,31 @@
         <a href="https://apps.apple.com/us/app/beige/id6800103617" class="btn btn--outline" style="font-size:0.82rem;" target="_blank" rel="noopener">App Store ↗</a>
       </div>
       <p style="margin-top:1rem; font-size:0.9rem; color:var(--text-muted);">
-        This is the only project here without a public repository — it is a shipped App Store
-        product rather than a portfolio build, so the source stays private. The app itself is
-        free to download, and the architecture, data pipeline, and CI/CD are documented in full
-        in the <a href="technical.html">technical deep-dive</a>. Happy to walk through the code
-        directly on request.
+        The app is live on the iOS App Store, and the web version runs at
+        <a href="https://puzzles.beigechessapp.com" target="_blank" rel="noopener">puzzles.beigechessapp.com</a>.
+        This is the only project here without a public repository. It is a shipped App Store
+        product rather than a portfolio build, so the source stays private. The app is free to
+        download, and the architecture, data pipeline and CI/CD are documented in the
+        <a href="technical.html">technical deep-dive</a>. I'm happy to walk through the code on
+        request.
       </p>
     </header>
 
     <section style="padding-top:2.5rem;">
       <h2>The Problem</h2>
       <p>
-        Lichess and Chess.com both have huge puzzle databases, but neither lets you drill
+        Lichess and Chess.com both have large puzzle databases, but neither lets you practise
         a specific weakness at your own level. If I keep missing discovered attacks at a
-        1700 rating, there's no way to ask either site for "200 discovered-attack puzzles
-        rated around 1700" and just work through those back to back. You get whatever the
-        algorithm serves next, tagged with Lichess's crowd-sourced themes, which are useful
-        but not something I could verify or trust the way I could trust my own analysis.
+        1700 rating, I can't ask either site for "200 discovered-attack puzzles rated around
+        1700" and work through them in a row. You get whatever the algorithm serves next,
+        tagged with Lichess's crowd-sourced themes. Those themes are useful, but I couldn't
+        verify them myself.
       </p>
       <p>
-        Beige is built around that specific gap: every puzzle is re-tagged by a pipeline I
-        wrote myself — motifs, special moves, pawn structure, game phase — derived entirely
-        from replaying the actual solution moves with <code>python-chess</code>, not from
-        Lichess's <code>Themes</code> column. Then the app lets you filter by ELO bracket and
-        motif and just play.
+        Beige is built to fill that gap. Every puzzle is re-tagged by a pipeline I wrote
+        (motifs, special moves, pawn structure and game phase), derived from replaying the
+        solution moves with <code>python-chess</code> rather than from Lichess's
+        <code>Themes</code> column. The app then lets you filter by ELO bracket and motif.
       </p>
     </section>
 
@@ -78,33 +79,33 @@
       <p>
         <strong>Rated Play</strong> serves puzzles at your current level using an
         expected-score-scaled ELO (starting at 600, no ceiling assumed) so the rating stays
-        meaningful as you improve. <strong>Unrated Play</strong> exposes a single-select ELO
+        meaningful as you improve. <strong>Unrated Play</strong> has a single-select ELO
         bracket wheel (600–3000 in 100-point steps) and a single-select motif wheel (forks,
-        pins, mates, skewers, discovered attacks) so you can drill exactly one combination —
-        "1800 elo, discovered attacks" — as many times as you want.
+        pins, mates, skewers, discovered attacks), so you can practise one combination, such
+        as "1800 ELO, discovered attacks", as many times as you want.
       </p>
       <p>
         <strong>Player Insights</strong> tracks per-motif, per-phase, and per-piece
         solve accuracy separately from the main ELO, plus a day-streak and a monthly
         solved/attempted trend. <strong>Lichess sync</strong> links an existing Lichess
         account and seeds your starting ELO from your real puzzle rating instead of a
-        hardcoded default. A <strong>guest mode</strong> lets anyone play with purely
-        local progress and no account at all — added specifically so an App Store reviewer
-        without a demo account could actually use the app (more on that below).
+        hardcoded default. A <strong>guest mode</strong> lets anyone play with local
+        progress only and no account. I added it so an App Store reviewer without a demo
+        account could use the app (see below).
       </p>
       <p>
-        It shipped to the iOS App Store as <strong>Beige</strong>; Android packaging exists
-        (same Capacitor wrapper) but hasn't gone through Play Store submission yet.
+        It shipped to the iOS App Store as <strong>Beige</strong>. Android packaging exists
+        (same Capacitor wrapper) but hasn't been submitted to the Play Store yet.
       </p>
     </section>
 
     <section style="padding-top:2rem;">
       <h2>Architecture Overview</h2>
       <p>
-        The app is really two very different workloads kept deliberately apart: a
-        high-volume, latency-critical <strong>read plane</strong> serving the anonymous
-        puzzle catalog, and a low-volume, spiky <strong>write plane</strong> handling
-        per-user accounts, progress, and Lichess import.
+        The app has two workloads with different requirements, and I deployed them
+        separately: a high-volume, latency-critical <strong>read plane</strong> serving the
+        anonymous puzzle catalog, and a low-volume, spiky <strong>write plane</strong>
+        handling per-user accounts, progress and Lichess import.
       </p>
       <pre>                 Capacitor app (iOS)
                           │
@@ -126,10 +127,10 @@
                           │   DynamoDB tables          │
                           └────────────────────────────┘</pre>
       <p>
-        The read plane is exactly the local prototype's <code>server.py</code> plus a SQLite
-        catalog, deployed to a Lightsail container service — no ALB, no VPC to design. The
-        write plane is API Gateway with a Cognito JWT authorizer in front of six small
-        Lambda functions, backed by two DynamoDB tables. Full reasoning for the split is in
+        The read plane is the local prototype's <code>server.py</code> plus a SQLite
+        catalog, deployed to a Lightsail container service with no ALB and no VPC to design.
+        The write plane is API Gateway with a Cognito JWT authorizer in front of six small
+        Lambda functions, backed by two DynamoDB tables. The reasoning for the split is in
         the <a href="technical.html">technical deep-dive</a>.
       </p>
     </section>
@@ -138,60 +139,56 @@
       <h2>Key Design Decisions</h2>
 
       <div class="decision">
-        <p class="decision__label">SQLite Catalog, Not DynamoDB</p>
+        <p class="decision__label">SQLite for the puzzle catalog</p>
         <p>
-          The catalog gets filtered on multiple independent dimensions at once — ELO
-          bracket, motif, game phase, piece — then picks one match at random. That's exactly
-          what a SQL index does well and exactly what DynamoDB does badly without a
-          separate GSI per query shape. So the 2.95-million-puzzle catalog stays on SQLite,
-          queried live on every request, and DynamoDB is reserved for per-user data and a
-          reference lookup table — never the catalog itself.
+          The catalog is filtered on several independent dimensions at once (ELO bracket,
+          motif, game phase, piece) and then one match is picked at random. SQL indexes
+          handle that well. DynamoDB would need a separate GSI for each query shape. I kept
+          the 2.95-million-puzzle catalog in SQLite, queried live on every request, and used
+          DynamoDB only for per-user data and a reference lookup table.
         </p>
       </div>
 
       <div class="decision">
-        <p class="decision__label">Lightsail, Not Fargate + ALB</p>
+        <p class="decision__label">Lightsail instead of Fargate and an ALB</p>
         <p>
-          The read plane was originally planned as Fargate behind an ALB. Lightsail serves
-          the same <code>server.py</code> image with HTTPS and a custom domain built in, no
-          ALB and no customer-managed VPC — cutting the always-on cost from roughly
-          $40/month down to a flat ~$10/month. If catalog traffic ever outgrows Lightsail,
-          graduating to Fargate later is still an option; it just wasn't worth the
-          complexity on day one.
+          I originally planned the read plane as Fargate behind an ALB. Lightsail serves
+          the same <code>server.py</code> image with HTTPS and a custom domain built in, with
+          no ALB and no customer-managed VPC. The Lightsail read plane costs a flat ~$10/month,
+          and the whole stack runs at about $10–15/month, compared with roughly $40/month
+          for the Fargate plan. If catalog traffic outgrows Lightsail, moving to Fargate is
+          still an option. It wasn't worth the extra complexity at launch.
         </p>
       </div>
 
       <div class="decision">
         <p class="decision__label">Required Accounts, Plus a Guest-Mode Carve-Out</p>
         <p>
-          Accounts are required — Cognito with Sign in with Apple and Google, no
-          guest/anonymous path in the original design — so progress syncs across devices.
-          That decision had a real cost during App Store review: with no demo account and
-          only social sign-in, a reviewer had nothing to test the app with. I added a
-          "Continue as Guest" path afterward, backed purely by local storage, specifically
-          to satisfy Apple's request for a way to review the app without an account.
+          Accounts are required so progress syncs across devices. Sign-in is through Cognito
+          with Sign in with Apple and Google, and the original design had no guest or
+          anonymous path. This caused a problem in App Store review: with no demo account and
+          only social sign-in, the reviewer had no way to test the app. I added a
+          "Continue as Guest" path afterwards, backed by local storage only, to meet Apple's
+          request for a way to review the app without an account.
         </p>
       </div>
 
       <div class="decision">
         <p class="decision__label">Server-Authoritative ELO via Posted Events</p>
         <p>
-          The client posts an event — "solved puzzle X, rating R, win" — and the server
-          applies the ELO delta, not the other way round. If the client computed its own
-          ELO locally, two devices could each apply the same history against a stale local
-          copy and diverge. Sending events instead of computed state is what keeps
-          cross-device sync consistent.
+          The client posts an event ("solved puzzle X, rating R, win") and the server
+          applies the ELO delta. If the client computed its own ELO locally, two devices
+          could each apply the same history against a stale local copy and diverge. Sending
+          events instead of computed state keeps cross-device sync consistent.
         </p>
       </div>
 
       <div class="decision">
-        <p class="decision__label">Capacitor, Not React Native</p>
+        <p class="decision__label">Capacitor for the mobile apps</p>
         <p>
           The prototype was already a working vanilla HTML/JS/CSS app with a mobile-first
-          layout. Capacitor wraps that as-is for the App Store and Play Store; rewriting it
-          in React Native would have meant redoing a UI that already worked, for no real
-          gain given the app has no need for anything React Native offers that the web
-          stack didn't already have.
+          layout. Capacitor wraps it as-is for the App Store and Play Store, so the UI did not
+          need to be rebuilt for mobile.
         </p>
       </div>
     </section>
@@ -199,23 +196,23 @@
     <section style="padding-top:2rem;">
       <h2>How It Was Built</h2>
       <p>
-        The build order followed the data dependencies: nothing about accounts, sync, or
-        mobile packaging mattered until the puzzle data itself existed and was trustworthy.
+        I built it in order of data dependencies. Accounts, sync and mobile packaging
+        depended on having reliable puzzle data first.
       </p>
 
       <div class="decision">
         <p class="decision__label">1 · Data Pipeline</p>
-        <p>Filtered and tagged the full Lichess puzzle CSV with a Python pipeline built on <code>python-chess</code> FEN/move replay — motifs, special moves, pawn structure, and game phase all derived from what the solution sequence itself does, never a generic board scan and never Lichess's own crowd tags.</p>
+        <p>Filtered and tagged the full Lichess puzzle CSV with a Python pipeline built on <code>python-chess</code> FEN/move replay. Motifs, special moves, pawn structure and game phase are derived from what the solution sequence does, not from a generic board scan or Lichess's own crowd tags.</p>
       </div>
 
       <div class="decision">
         <p class="decision__label">2 · Local Prototype</p>
-        <p><code>server.py</code> (Python stdlib only) serving a small JSON API backed by live, parameterized SQL against a local SQLite build of the tagged dataset, plus a vanilla JS/HTML/CSS frontend with no framework and no bundler.</p>
+        <p><code>server.py</code> (Python stdlib only) serving a small JSON API backed by live, parameterised SQL against a local SQLite build of the tagged dataset, plus a vanilla JS/HTML/CSS frontend with no framework and no bundler.</p>
       </div>
 
       <div class="decision">
         <p class="decision__label">3 · Identity &amp; Write Plane</p>
-        <p>Cognito user pool with Apple/Google federation, two DynamoDB tables, and Lambda functions behind an API Gateway HTTP API with a Cognito JWT authorizer — validated locally against DynamoDB Local before any of it touched real AWS.</p>
+        <p>Cognito user pool with Apple/Google federation, two DynamoDB tables, and Lambda functions behind an API Gateway HTTP API with a Cognito JWT authorizer. I validated it locally against DynamoDB Local before deploying anything to AWS.</p>
       </div>
 
       <div class="decision">
@@ -225,12 +222,12 @@
 
       <div class="decision">
         <p class="decision__label">5 · CI/CD Pipeline</p>
-        <p>GitHub Actions with OIDC-assumed roles (no long-lived AWS keys as secrets), five required PR checks, and an auto-deploy workflow that rebuilds the container, applies Terraform, and runs a live smoke test against the real deployed site after every merge to main.</p>
+        <p>GitHub Actions with OIDC-assumed roles (no long-lived AWS keys as secrets), five required PR checks, and an auto-deploy workflow that rebuilds the container, applies Terraform and runs a smoke test against the deployed site after every merge to main.</p>
       </div>
 
       <div class="decision">
         <p class="decision__label">6 · Mobile Packaging &amp; Submission</p>
-        <p>Wrapped the same frontend with Capacitor for iOS and Android, worked through Apple's Distribution signing and App Review requirements (including a rejection over reviewer access, which is what guest mode exists to fix), and shipped to the App Store.</p>
+        <p>Wrapped the same frontend with Capacitor for iOS and Android, worked through Apple's Distribution signing and App Review requirements (including a rejection over reviewer access, which guest mode was added to resolve), and shipped to the App Store.</p>
       </div>
     </section>
 

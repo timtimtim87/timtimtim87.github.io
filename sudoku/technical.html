@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SUDOKOO — Technical Deep-Dive</title>
+  <title>SUDOKOO Technical Deep-Dive | Tim Hewitt</title>
   <link rel="stylesheet" href="../styles.css" />
 </head>
 <body>
@@ -71,23 +71,22 @@
       <section id="cloudfront-s3">
         <h2>CloudFront + S3 Delivery</h2>
         <p>
-          The static website (HTML, CSS, JavaScript) is hosted in a private S3 bucket and
-          delivered through CloudFront. CloudFront serves as the only access point —
-          the S3 bucket has no public access. S3 versioning is enabled on the bucket — files are encrypted at rest with SSE-AES256.
+          The static website (HTML, CSS, JavaScript) was hosted in a private S3 bucket and
+          delivered through CloudFront. CloudFront was the only access point, and the S3 bucket
+          had no public access. S3 versioning was enabled on the bucket, and files were encrypted at rest with SSE-S3 (AES-256).
         </p>
         <img src="SUDOKOO.jpg" alt="Sudoku architecture flow diagram" style="width:100%; margin:1rem 0;" />
         <p>
-          CloudFront provides two key benefits beyond CDN caching:
+          CloudFront provided two benefits beyond CDN caching:
         </p>
         <ol>
           <li>
-            <strong>HTTPS enforcement.</strong> My CloudFront distribution redirects HTTP to HTTPS. HTTPS is
-            required for browsers to allow camera access — browsers restrict camera APIs to secure
-            contexts only.
+            <strong>HTTPS enforcement.</strong> The CloudFront distribution redirected HTTP to HTTPS. Browsers
+            only allow camera access in secure contexts, so HTTPS was required for the camera feature.
           </li>
           <li>
             <strong>Cost control.</strong> S3 charges for data transfer out. CloudFront caches
-            at edge locations so subsequent requests are served from cache, not from S3.
+            at edge locations, so subsequent requests are served from the cache instead of from S3.
           </li>
         </ol>
       </section>
@@ -113,9 +112,9 @@
   }
 }</pre>
         <p>
-          The condition scopes access to this specific distribution ARN — not all CloudFront
-          distributions in the account, and also not the CloudFront service generally. Even if someone
-          created another CloudFront distribution pointing at this bucket, the bucket policy
+          The condition scopes access to this specific distribution ARN. Other CloudFront
+          distributions in the account, and the CloudFront service in general, are not granted access.
+          If someone created another CloudFront distribution pointing at this bucket, the bucket policy
           would reject requests from it.
         </p>
       </section>
@@ -135,11 +134,11 @@ Access-Control-Allow-Methods: POST, OPTIONS
 Access-Control-Allow-Headers: Content-Type</pre>
         <p>
           <code>Access-Control-Allow-Origin: *</code> means any domain can make
-          browser-based requests to the API — not just the portfolio site. Combined with
-          the fact that the API endpoint URL is visible in the page's JavaScript source,
-          there is no practical barrier to another site calling this API. This was a
-          learning gap, and only something I realised after deploying this web application. If I decided to rebuild this, the origin would be restricted to the specific
-          CloudFront domain. Other methods of securing access would be to utilise API keys so that only authenticated requests can reach the Lambda function.
+          browser-based requests to the API, including sites other than this one. The API endpoint
+          URL was also visible in the page's JavaScript source, so there was no practical barrier to
+          another site calling the API. This was a learning gap that I only realised after deploying
+          the application. In a rebuild I would restrict the origin to the specific CloudFront domain.
+          API keys would be another way to ensure that only authorised requests reach the Lambda function.
         </p>
       </section>
 
@@ -154,20 +153,25 @@ Access-Control-Allow-Headers: Content-Type</pre>
               <tr><td>Runtime</td><td>Node.js 18.x</td><td>AWS SDK v3 (<code>@aws-sdk/client-bedrock-runtime</code>)</td></tr>
               <tr><td>Memory</td><td>512 MB</td><td>Handles base64 image encoding in memory</td></tr>
               <tr><td>Timeout</td><td>30 seconds</td><td>Accommodates Bedrock model inference latency</td></tr>
-              <tr><td>Architecture</td><td>x86_64</td><td>Default — arm64 would be cheaper but negligible at this scale</td></tr>
+              <tr><td>Architecture</td><td>x86_64</td><td>Default. arm64 would be cheaper, but the difference is negligible at this scale.</td></tr>
             </tbody>
           </table>
         </div>
         <p>
           The 30-second timeout is driven by Bedrock response latency. Claude 3.5 Sonnet
-          processing a high-resolution image with a detailed extraction prompt takes
-          4–12 seconds in practice. The timeout provides headroom for occasional slower
-          responses without failing the user request.
+          took 4–12 seconds in practice to process a high-resolution image with a detailed
+          extraction prompt. The timeout provided headroom for occasional slower responses
+          without failing the user request.
         </p>
         <p>
-          Memory at 512 MB handles base64 encoding of a typical phone camera image
-          (3–8 MB JPEG → ~4–11 MB base64) in memory. CloudWatch logs confirm actual
-          usage is well below 512 MB. If I had hundreds, or thousands of actual Lambda invocations, I would be able to optimise the memory (and therefore compute) from the log data I collect. There is a tool called "aws-lambda-power-tuning" which is open source software that allows me to optimise my lambda function for cost.
+          The 512 MB memory setting holds the base64-encoded image and the Bedrock request in
+          memory. The image is sent as base64 inside a JSON request body, and a synchronous Lambda
+          invocation payload is limited to 6 MB. Base64 adds about a third to the file size, so large
+          phone photos need to be resized in the browser before upload to stay under that limit.
+          CloudWatch logs showed actual memory usage well below 512 MB. With hundreds or thousands of
+          real invocations, I could tune the memory setting (and therefore compute) from the log data.
+          The open-source aws-lambda-power-tuning tool can be used to find the most cost-effective
+          memory setting for a Lambda function.
         </p>
       </section>
 
@@ -183,12 +187,12 @@ Access-Control-Allow-Headers: Content-Type</pre>
         <p>
           API Gateway handles SSL termination, request routing, and throttling. As noted
           in the CORS section, access security on this API was not implemented correctly.
-          The endpoint has no API key, no authorizer, and no usage plan — any caller with
-          the URL can trigger the Lambda, which calls Bedrock and incurs a charge. IAM
-          correctly scopes what Lambda is permitted to do, but IAM doesn't control who is
-          allowed to trigger Lambda in the first place. If rebuilding this, the right
-          approach would be to utilise an API Gateway usage plan with a per-key rate limit to cap
-          costs. The default throttle limits (10,000 req/s) are far too high to act as a meaningful guardrail.
+          The endpoint had no API key, no authoriser and no usage plan, so any caller with
+          the URL could trigger the Lambda function, which calls Bedrock and incurs a charge. IAM
+          correctly scoped what Lambda was permitted to do, but IAM does not control who is
+          allowed to trigger Lambda in the first place. In a rebuild I would use an API Gateway
+          usage plan with a per-key rate limit to cap costs. The default throttle limit
+          (10,000 requests per second) is far too high to act as a useful guardrail.
         </p>
       </section>
 
@@ -197,18 +201,19 @@ Access-Control-Allow-Headers: Content-Type</pre>
       <section id="network">
         <h2>Network Design</h2>
         <p>
-          Lambda runs in AWS's managed environment with no VPC configuration. The workload calls public APIs (Bedrock)
-          and accesses AWS-internal services (S3), neither of which requires VPC deployment.
+          Lambda ran in the AWS-managed environment with no VPC configuration. The only service
+          the function called was Bedrock, which is an AWS service endpoint reached over HTTPS.
+          That does not require VPC deployment.
         </p>
         <p>
-          Lambda accessing Bedrock routes over AWS's internal network. Lambda accessing S3
-          for (future) image storage would also route internally. No traffic to AWS services
-          traverses the public internet.
+          Calls from Lambda to Bedrock used the regional Bedrock endpoint over TLS. If image
+          storage in S3 were added later, S3 is also an AWS service endpoint reached over HTTPS,
+          so it would not need a VPC either.
         </p>
         <p>
-          The key question when evaluating VPC deployment is... <em>does this workload need to
-          access private network resources?</em> For SUDOKOO, the answer is no. All resources
-          are either AWS managed services (accessible internally) or public APIs (HTTPS).
+          The question when evaluating VPC deployment is <em>whether the workload needs to
+          access private network resources.</em> For SUDOKOO, it did not. The function only
+          used AWS managed services reached through their HTTPS endpoints.
         </p>
       </section>
 
@@ -217,9 +222,9 @@ Access-Control-Allow-Headers: Content-Type</pre>
       <section id="bedrock">
         <h2>Bedrock Integration</h2>
         <p>
-          Amazon Bedrock provides managed access to foundation AI models without infrastructure
-          management. The Lambda function calls the Bedrock
-          API with the image data and a prompt for obtaining a structured puzzle data response.
+          Amazon Bedrock provides managed access to foundation models without infrastructure
+          to manage. The Lambda function called the Bedrock API with the image data and a prompt
+          asking for the puzzle as structured data.
         </p>
         <pre>// Lambda handler (simplified)
 const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
@@ -253,11 +258,11 @@ const response = await client.send(new InvokeModelCommand({
   })
 }));</pre>
         <p>
-          Claude is asked to return JSON only. The Lambda code also strips markdown "wrapper"
-          as a fallback if Claude wraps the response. After extraction and puzzle validation,
-          the Lambda runs its own backtracking solver and returns both the puzzle and solution
-          to the frontend. Claude handles extraction; Lambda handles solving; the browser
-          handles gameplay and validates each move against the stored solution in real time.
+          The prompt asks Claude to return JSON only. As a fallback, the Lambda code strips any
+          Markdown code fence that Claude wraps around the response. After extraction and puzzle
+          validation, the Lambda function runs its own backtracking solver and returns both the
+          puzzle and the solution to the frontend. Claude handles extraction and Lambda handles
+          solving. The browser handles gameplay and checks each move against the stored solution.
         </p>
 
       </section>
@@ -267,27 +272,28 @@ const response = await client.send(new InvokeModelCommand({
       <section id="failure-modes">
         <h2>Failure Modes</h2>
         <p>
-          The AI extraction has two main failure modes, observed through CloudWatch logs
-          by comparing response output with the original puzzle photos:
+          The AI extraction had two main failure modes. I identified them in CloudWatch logs
+          by comparing the response output with the original puzzle photos:
         </p>
         <ol>
           <li>
             <strong>Grid alignment errors.</strong> Correct digit values placed in adjacent
-            cells — typically off by one row or column.
+            cells, typically off by one row or column.
           </li>
           <li>
-            <strong>Character recognition errors.</strong> Digits misread — most commonly
+            <strong>Character recognition errors.</strong> Misread digits, most commonly
             <code>1</code> read as <code>7</code>, or <code>6</code> read as <code>8</code>.
           </li>
         </ol>
         <p>
           The built-in puzzle validity checker (verifying no duplicate values in any
-          row, column, or 3×3 box) catches alignment errors.
+          row, column or 3×3 box) catches alignment errors. A misread digit can still produce
+          a grid that passes this check but does not match the original puzzle.
         </p>
         <p>
-          Overall success rate: approximately 50%. For a single-user personal tool,
-          this is acceptable. Re-scanning with better lighting or a different angle
-          usually resolves failures.
+          The overall success rate was approximately 50%. For a single-user personal tool,
+          this was acceptable. Re-scanning with better lighting or from a different angle
+          usually resolved failures.
         </p>
       </section>
 
@@ -296,25 +302,24 @@ const response = await client.send(new InvokeModelCommand({
       <section id="future-improvements">
         <h2>Future Improvements</h2>
         <div class="callout callout--info">
-          These are genuine improvements I would make if this project were production-bound —
-          not hypothetical additions included for portfolio completeness.
+          These are the changes I would make if I rebuilt this project for production use.
         </div>
         <ul>
           <li>
-            <strong>Structured JSON output.</strong> Claude now supports structured output mode,
-            which guarantees a specific JSON schema in the response. The current implementation
-            parses free-text output, adding complexity and fragility. Structured output would
-            simplify the Lambda function significantly and improve reliability.
+            <strong>Structured JSON output.</strong> Use tool use or structured outputs on a
+            current Claude model so the response follows a fixed JSON schema, instead of parsing
+            free text. The original implementation parsed free-text output, which added complexity
+            and fragility. A fixed schema would simplify the Lambda function and improve reliability.
           </li>
           <li>
-            <strong>CI/CD pipeline.</strong> Manual S3 upload + CloudFront invalidation per
-            frontend change was the most operationally painful part of this project. A GitHub
-            Actions workflow (push to main → S3 sync → invalidation) would take no time to
-            implement and save significant time on all future iterations.
+            <strong>CI/CD pipeline.</strong> A manual S3 upload and CloudFront invalidation for every
+            frontend change was the most time-consuming operational task in this project. A GitHub
+            Actions workflow (push to main → S3 sync → invalidation) would be quick to implement
+            and would save time on every later change.
           </li>
           <li>
-            <strong>Confidence threshold and retry.</strong> If Bedrock returns a response with
-            validation errors, automatically retry with a prompt variation before returning
+            <strong>Confidence threshold and retry.</strong> If Bedrock returns a response that
+            fails validation, automatically retry with a different prompt before returning a
             failure to the user.
           </li>
           <li>
@@ -329,15 +334,15 @@ const response = await client.send(new InvokeModelCommand({
       <section id="iam">
         <h2>IAM Design</h2>
         <p>
-          The Lambda execution role has two permissions:
+          The Lambda execution role had two permissions:
         </p>
         <ul>
           <li>
-            <strong>AWSLambdaBasicExecutionRole</strong> — AWS managed policy, attached directly.
+            <strong>AWSLambdaBasicExecutionRole:</strong> AWS managed policy, attached directly.
             Grants CloudWatch Logs write access across all log groups.
           </li>
           <li>
-            <strong>Custom inline policy</strong> — <code>bedrock:InvokeModel</code> scoped to
+            <strong>Custom inline policy:</strong> <code>bedrock:InvokeModel</code> scoped to
             the specific model ARN: <code>anthropic.claude-3-5-sonnet-20241022-v2:0</code>.
             The function cannot invoke any other Bedrock model. Switching to a different model requires an explicit IAM update.
           </li>
@@ -355,14 +360,14 @@ const response = await client.send(new InvokeModelCommand({
             <tbody>
               <tr><td>Static website files</td><td>HTTPS via CloudFront (ACM cert)</td><td>SSE-S3 on bucket</td></tr>
               <tr><td>Puzzle image (upload)</td><td>HTTPS via API Gateway</td><td>Not stored</td></tr>
-              <tr><td>Lambda ↔ Bedrock</td><td>TLS (AWS internal)</td><td>N/A</td></tr>
-              <tr><td>Lambda ↔ S3</td><td>TLS (AWS internal)</td><td>SSE-S3</td></tr>
+              <tr><td>Lambda ↔ Bedrock</td><td>TLS (HTTPS to Bedrock endpoint)</td><td>N/A</td></tr>
             </tbody>
           </table>
         </div>
         <p>
-          Uploaded images are not stored — they are processed in Lambda memory and discarded.
-          No user data persists beyond the duration of the Lambda invocation. Saving the images would help me build up a training dataset for training custom ML models in the future (if I was to continue building this).
+          Uploaded images were not stored. They were processed in Lambda memory and discarded,
+          and no user data persisted beyond the Lambda invocation. If I continued the project,
+          saving the images would provide a dataset for training a custom model.
         </p>
       </section>
 
@@ -372,15 +377,20 @@ const response = await client.send(new InvokeModelCommand({
         <h2>WAF Decision</h2>
         <p>
           AWS WAF was deployed initially with three managed rules: SQL injection protection,
-          XSS protection, and the common ruleset (CRS). Cost: $8/month. It is a layer 7 (application layer) security feature, not deep infra security.
+          XSS protection (known bad inputs) and the core rule set (CRS). The cost was $8/month.
+          WAF inspects HTTP requests at layer 7 (the application layer). Network-layer DDoS
+          protection comes from AWS Shield Standard, which is included at no extra cost.
         </p>
         <p>
-          For a hobby project, a single-user portfolio project with no real traffic, no user accounts, no stored data, and no
-          financial transactions, $8/month seemed expensive.
+          For a single-user portfolio project with no real traffic, no user accounts, no stored
+          data and no financial transactions, $8/month was more than the protection was worth.
+          The app had no database, so the SQL injection rule protected nothing. The risk I had
+          actually identified was anyone calling the open API and running up Bedrock charges,
+          which a single WAF rate-based rule or an API Gateway usage plan would have handled better.
         </p>
         <p>
-          If this was a "real webapp" with actual traffic, authenticated users, stored PII, payment
-          processing, I would reapply the WAF.
+          For a production application with real traffic, authenticated users, stored personal
+          information or payment processing, I would add WAF back.
         </p>
       </section>
 
@@ -392,10 +402,10 @@ const response = await client.send(new InvokeModelCommand({
           <table>
             <thead><tr><th>Service</th><th>Monthly cost</th><th>Notes</th></tr></thead>
             <tbody>
-              <tr><td>Lambda</td><td>~$0</td><td>Free tier — sporadic single-user usage</td></tr>
+              <tr><td>Lambda</td><td>~$0</td><td>Free tier, occasional single-user usage</td></tr>
               <tr><td>API Gateway</td><td>~$0</td><td>Free tier</td></tr>
               <tr><td>S3</td><td>~$0.01</td><td>Small static files, minimal requests</td></tr>
-              <tr><td>CloudFront</td><td>~$0</td><td>Free tier — 1 TB/month data transfer included</td></tr>
+              <tr><td>CloudFront</td><td>~$0</td><td>Free tier, 1 TB/month data transfer included</td></tr>
               <tr><td>Bedrock (Claude 3.5 Sonnet)</td><td>Variable</td><td>~$0.003–0.015 per scan depending on image size</td></tr>
               <tr><td>CloudWatch Logs</td><td>~$0</td><td>Minimal volume</td></tr>
               <tr><td><strong>Total (excluding Bedrock)</strong></td><td><strong>~$0/month</strong></td><td>Bedrock is the only meaningful cost</td></tr>
@@ -416,11 +426,11 @@ const response = await client.send(new InvokeModelCommand({
         <h2>Deployment Process</h2>
         <p>
           Infrastructure was initially set up through the AWS console. The goal was
-          building hands-on understanding of each service's configuration options visually. The
-          painful part was CloudFront cache invalidation — every frontend change required
-          triggering a <code>/*</code> invalidation and waiting 60–90 seconds for it to
-          propagate. Doing that manually on every iteration became tedious quickly. A proper CI/CD pipeline (push to main → S3
-          sync → invalidation) would eliminate the manual step entirely.
+          to build hands-on understanding of each service's configuration options. The
+          slowest part was CloudFront cache invalidation. Every frontend change required
+          a <code>/*</code> invalidation and a wait of 60–90 seconds for it to propagate,
+          which became tedious. A CI/CD pipeline (push to main → S3 sync → invalidation)
+          would remove the manual step.
         </p>
         <div style="padding-bottom: 3rem;"></div>
       </section>

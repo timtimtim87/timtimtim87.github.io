@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Stock Screener — Technical Deep-Dive</title>
+  <title>Stock Screener Technical Deep-Dive | Tim Hewitt</title>
   <link rel="stylesheet" href="../styles.css" />
 </head>
 <body>
@@ -89,7 +89,7 @@
   │
   ├── DataBucket (S3)
   │   ├── SSE-S3 encryption
-  │   └── Versioning: Enabled (no lifecycle policy — see Operational Learnings)
+  │   └── Versioning: Enabled (no lifecycle policy, see Operational Learnings)
   │
   └── WebhookApi (API Gateway)
       └── POST /webhook → TelegramBotFunction</pre>
@@ -114,14 +114,14 @@
           Both functions share a single <code>LambdaExecutionRole</code>. The role grants:
         </p>
         <ul>
-          <li>Full S3 read/write access (<code>GetObject</code>, <code>PutObject</code>, <code>DeleteObject</code>, <code>ListBucket</code>) scoped to the data bucket ARN</li>
+          <li>S3 read and write access (<code>GetObject</code>, <code>PutObject</code>, <code>DeleteObject</code>, <code>ListBucket</code>) scoped to the data bucket</li>
           <li><code>ssm:GetParameter</code> and <code>ssm:GetParameters</code> scoped to the <code>/screener/*</code> parameter path</li>
-          <li><code>lambda:InvokeFunction</code> and <code>lambda:ListFunctions</code> on <code>Resource: "*"</code> — used by the bot's <code>/trigger</code> command</li>
+          <li><code>lambda:InvokeFunction</code> and <code>lambda:ListFunctions</code> on <code>Resource: "*"</code>, used by the bot's <code>/trigger</code> command</li>
           <li>CloudWatch Logs write access for both functions</li>
         </ul>
         <p>
           S3 and SSM access is scoped to specific resource ARNs. The Lambda invoke permissions
-          use a wildcard resource — a known over-provisioning. The correct fix is to pass the
+          use a wildcard resource, which is a known over-provisioning. The correct fix is to pass the
           collector's ARN as an environment variable at deploy time and scope the
           <code>InvokeFunction</code> permission to that specific ARN, which would also
           eliminate the fragile name-scan used by <code>/trigger</code>.
@@ -138,21 +138,21 @@
       <section id="network">
         <h2>Network Architecture</h2>
         <p>
-          Both Lambda functions run in AWS's default managed environment — no VPC
-          configuration. This is a deliberate cost decision.
+          Both Lambda functions ran without VPC attachment, in Lambda's default
+          managed network environment. This was a deliberate cost decision.
         </p>
 
         <p>
           Lambda accesses S3 and Parameter Store through AWS internal service endpoints.
           Data routes over AWS's backbone without traversing the public internet.
           External API calls to Polygon, Alpaca, and Telegram use standard HTTPS.
-          For a personal trading tool, this is totally fine.
+          For a personal trading tool, this level of network isolation was sufficient.
         </p>
         <div class="callout">
           <strong>When VPC would make sense.</strong> If this system handled PII, processed
           financial transactions, or needed to access resources inside a private network
           (e.g. a private RDS instance), VPC deployment would be justified. For Lambda
-          reading and writing CSV files and calling public APIs, it doesn't add much security value.
+          reading and writing CSV files and calling public APIs, it adds little security value.
         </div>
       </section>
 
@@ -163,9 +163,9 @@
         <h3>Memory Sizing</h3>
         <p>
           The two functions are sized to their workloads. The data collector runs at 1,024 MB
-          because it fetches ~900 stocks sequentially and builds pandas DataFrames from the
-          API responses entirely in memory. The bot runs at 512 MB — its work is JSON parsing
-          and S3 reads, which CloudWatch logs confirm uses ~170 MB in practice. Lambda billing
+          because it fetches price history for ~750 stocks sequentially and uses pandas to load
+          and rewrite the results CSVs in memory. The bot runs at 512 MB. Its work is JSON parsing
+          and S3 reads, and CloudWatch logs showed it using ~170 MB in practice. Lambda billing
           is GB-seconds, so right-sizing each function independently matters, even if the
           absolute cost is small at this scale.
         </p>
@@ -178,15 +178,15 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         <h3>Cold Starts</h3>
         <p>
           Cold starts add 3–4 seconds on the first invocation. For a daily data collection
-          job or an on-demand Telegram bot, this is acceptable. A user waiting 5 seconds
-          for their /daily command is a minor inconvenience. Optimising cold starts
+          job or an on-demand Telegram bot, this is acceptable. Waiting about 5 seconds for a
+          /daily response was a minor inconvenience. Optimising cold starts
           (smaller packages, provisioned concurrency) is not worth the added complexity
           at this usage scale.
         </p>
         <h3>Timeouts</h3>
         <p>
           Data collector: 900 seconds (the AWS hard ceiling for Lambda). The function
-          processes ~900 stocks sequentially with rate-limit pauses built in — a recorded
+          processes ~750 stocks sequentially with rate-limit pauses built in. A recorded
           production run completed in 81.65 seconds. Bot function: 60 seconds, sufficient for S3 reads
           and Alpaca API calls.
         </p>
@@ -197,9 +197,11 @@ Init Duration: 3354.69 ms   ← cold start</pre>
       <section id="eventbridge">
         <h2>EventBridge Scheduling</h2>
         <p>
-          The data collector triggers daily at 6 AM ET via an EventBridge cron rule.
-          This runs before US market open (9:30 AM ET), using the previous day's EOD
-          data from Polygon.
+          An EventBridge cron rule invoked the data collector daily at 11:00 UTC.
+          EventBridge cron expressions are evaluated in UTC, so the run started at 6 AM ET
+          during US standard time and 7 AM ET during daylight saving time. Both are before
+          the US market open (9:30 AM ET). Each run used the previous day's end-of-day data
+          from Polygon.
         </p>
         <pre>ScheduleExpression: cron(0 11 * * ? *)</pre>
         <p>
@@ -208,14 +210,15 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           A dead-letter queue could capture failed events for later inspection.
         </p>
         <div class="callout callout--warn">
-          <strong>Silent failure discovered post-deployment.</strong> I cancelled my Polygon
-          subscription, forgot that I was using Polygon for this project, and kept checking my Telegram bot, and nothing seemed wrong. The Lambda function executed successfully and
-          reported success. No alarm fired. What happened was it successfully worked and downloaded data for "0 stocks". The fix
-          is... validate that the ingested dataset is non-empty and "has today's date" before
-          writing to S3, failing the Lambda explicitly if <code>stocks_analyzed == 0</code>;
-          and publish <code>stocks_analyzed</code> as a CloudWatch custom metric on each run,
-          with an alarm that fires via SNS if the value drops below a threshold or the
-          function hasn't run within the expected window. That combination would have caught
+          <strong>Silent failure discovered after deployment.</strong> I cancelled my Polygon
+          subscription and forgot that this project depended on it. I kept checking my Telegram
+          bot and nothing appeared to be wrong. The Lambda function ran, processed data for
+          0 stocks, and reported success, and no alarm fired. Two changes would fix this.
+          The first is to validate that the ingested dataset is non-empty and has today's date
+          before writing to S3, and to fail the Lambda explicitly if <code>stocks_analyzed == 0</code>.
+          The second is to publish <code>stocks_analyzed</code> as a CloudWatch custom metric on each run,
+          with an alarm that notifies via SNS if the value drops below a threshold or the
+          function has not run within the expected window. Together these would have caught
           the lapse within one business day.
         </div>
       </section>
@@ -238,17 +241,19 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           </table>
         </div>
         <p>
-          Two files accumulate a daily row per run — the universe results and portfolio
-          snapshots build up a history over time. The candidates file is overwritten daily
-          as it only ever represents today's top 10. Historical analysis is done locally
-          by downloading the files via presigned URL; S3 is not queried as a time-series store.
+          Two files, the universe results and the portfolio snapshots, have each run's rows
+          appended, so they build up a history over time. The candidates file is overwritten daily
+          because it only represents the current top 10. Historical analysis is done locally
+          by downloading the files via presigned URL. S3 is not queried as a time-series store.
         </p>
         <h3>Versioning Lesson</h3>
         <p>
-          S3 versioning is enabled on the bucket. Without a lifecycle policy, each daily
-          overwrite of the candidates file creates a new version while retaining all previous
-          ones — the bucket grows unboundedly. A lifecycle rule expiring non-current versions
-          after 1 day is the fix. It has not yet been applied to the template.
+          S3 versioning is enabled on the bucket without a lifecycle policy. Every write
+          creates a new version and keeps the previous copy as a non-current version. This
+          applies to the overwritten candidates file and also to the two appended files, which
+          are read and rewritten in full on each run, so each retained copy is larger than the
+          last. As a result the bucket grows without limit. A lifecycle rule expiring non-current
+          versions after 1 day would fix this. It has not been added to the template.
         </p>
       </section>
 
@@ -269,14 +274,14 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         <p>
           All parameters live under the <code>/screener/</code> path prefix, which matches
           the IAM policy scope. <code>chat_id</code> is not a credential but an authorised
-          user identifier — the bot reads it at runtime to validate incoming Telegram
+          user identifier. The bot reads it at runtime to validate incoming Telegram
           messages before executing any command. Parameters are encrypted at rest by KMS.
           No credentials are stored in environment variables.
         </p>
         <p>
-          Parameter Store was chosen over Secrets Manager for this use case — standard
+          I chose Parameter Store over Secrets Manager for this use case because standard
           parameters are free, and the automatic rotation features of Secrets Manager
-          are not needed for API keys rotated manually.
+          are not needed for API keys that are rotated manually.
         </p>
       </section>
 
@@ -284,14 +289,14 @@ Init Duration: 3354.69 ms   ← cold start</pre>
 
       <section id="data-flow">
         <h2>Data Flow</h2>
-        <h3>Daily Collection (11 AM UTC)</h3>
+        <h3>Daily Collection (11:00 UTC)</h3>
         <img src="Stock_Screener_Data_Collection_Flow.jpg" alt="Data collection flow diagram" style="width:100%; margin-bottom:1rem;" />
         <ol>
           <li>EventBridge fires cron rule, invokes Data Collector Lambda</li>
           <li>Lambda retrieves Polygon and Alpaca credentials from Parameter Store</li>
-          <li>Calls Polygon snapshot endpoint — fetches data for ~900 Russell 1000 stocks</li>
+          <li>Calls the Polygon snapshot endpoint, then fetches daily price history for ~750 Russell 1000 stocks</li>
           <li>Ranks all stocks by strategy metric, selects top 10 candidates</li>
-          <li>Calls Alpaca positions endpoint — fetches current holdings data</li>
+          <li>Calls the Alpaca positions endpoint to fetch current holdings data</li>
           <li>Writes three files to S3: full ranked universe (appended), top 10 candidates (overwritten), portfolio snapshot (appended)</li>
           <li>Lambda exits</li>
         </ol>
@@ -302,7 +307,7 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           <li>User sends a command in Telegram</li>
           <li>Telegram POSTs to API Gateway webhook endpoint</li>
           <li>API Gateway invokes Telegram Bot Lambda</li>
-          <li>Lambda validates <code>chat_id</code> against an authorised value stored in Parameter Store — unauthorised requests are rejected</li>
+          <li>Lambda validates <code>chat_id</code> against an authorised value stored in Parameter Store. Unauthorised requests are rejected.</li>
           <li>Lambda retrieves credentials from Parameter Store and executes the command</li>
           <li>Formats results into a Telegram message and sends via Telegram Bot API</li>
           <li>Lambda exits</li>
@@ -312,11 +317,11 @@ Init Duration: 3354.69 ms   ← cold start</pre>
           <table>
             <thead><tr><th>Command</th><th>What it does</th></tr></thead>
             <tbody>
-              <tr><td><code>/dashboard</code>, <code>/daily</code></td><td>Reads portfolio + screening CSVs from S3, calls Alpaca account endpoint</td></tr>
+              <tr><td><code>/dashboard</code>, <code>/daily</code></td><td>Reads portfolio and screening CSVs from S3, calls Alpaca account endpoint</td></tr>
               <tr><td><code>/screen</code></td><td>Reads top candidates or full universe CSV from S3</td></tr>
               <tr><td><code>/portfolio</code></td><td>Reads portfolio snapshot CSV from S3</td></tr>
-              <tr><td><code>/account</code></td><td>Calls Alpaca account endpoint directly — equity, cash, buying power</td></tr>
-              <tr><td><code>/trigger</code></td><td>Invokes the data collector Lambda asynchronously — forces an out-of-schedule run</td></tr>
+              <tr><td><code>/account</code></td><td>Calls Alpaca account endpoint directly for equity, cash and buying power</td></tr>
+              <tr><td><code>/trigger</code></td><td>Invokes the data collector Lambda asynchronously to force an out-of-schedule run</td></tr>
               <tr><td><code>/stats</code></td><td>Reads all three CSVs, reports row counts and latest dates</td></tr>
             </tbody>
           </table>
@@ -328,16 +333,16 @@ Init Duration: 3354.69 ms   ← cold start</pre>
       <section id="telegram">
         <h2>Telegram Bot Interface</h2>
         <p>
-          Telegram's bot platform was chosen over a web dashboard for several reasons:
-          native mobile push notifications, simple text-based responses are easier to
-          implement than a charting interface, and the bot API is a straightforward
-          webhook model that maps cleanly to API Gateway + Lambda.
+          I chose Telegram's bot platform over a web dashboard for three reasons: it provides
+          native mobile push notifications, text responses are simpler to implement than a
+          charting interface, and the bot API uses a webhook model that maps directly to
+          API Gateway and Lambda.
         </p>
         <p>
-          Most commands are read-only against S3. Two commands go further: <code>/account</code>
+          Most commands are read-only against S3. Three commands go further: <code>/account</code>
           and <code>/dashboard</code> call Alpaca directly for live account data, and
-          <code>/trigger</code> invokes the collector Lambda asynchronously — useful for
-          forcing a fresh run outside the scheduled window without logging into AWS.
+          <code>/trigger</code> invokes the collector Lambda asynchronously, which I used to
+          force a fresh run outside the scheduled window without logging into AWS.
         </p>
         <p>
           All requests are authenticated by validating the incoming <code>chat_id</code>
@@ -360,16 +365,16 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         <h2>Observability</h2>
         <p>
           CloudWatch log groups are defined in the SAM template with explicit retention
-          policies: 30 days for the data collector, 14 days for the bot. CloudWatch Logs
-          charges for storage, so unbounded retention accumulates cost quietly.
+          policies: 30 days for the data collector and 14 days for the bot. CloudWatch Logs
+          charges for storage, so unlimited retention adds cost over time.
         </p>
         <div class="callout callout--warn">
-          <strong>No alarms are configured.</strong> This is the root cause of the silent
-          failure described previously — the collector completed with exit
-          code 200 while processing zero stocks, and nothing fired. The fix is a CloudWatch
-          alarm on a custom metric: the Lambda should publish <code>stocks_analyzed</code>
-          on each run, with an alarm that triggers an SNS notification if the value is zero
-          or if the function hasn't run within the expected window.
+          <strong>No alarms were configured.</strong> This is the root cause of the silent
+          failure described above. The collector returned success while processing zero
+          stocks, and nothing alerted me. A CloudWatch alarm on a custom metric would address
+          this: the Lambda would publish <code>stocks_analyzed</code> on each run, with an
+          alarm that sends an SNS notification if the value is zero or if the function has
+          not run within the expected window.
         </div>
       </section>
 
@@ -387,14 +392,13 @@ Init Duration: 3354.69 ms   ← cold start</pre>
               <tr><td>S3</td><td>~$0.01</td><td>3 small CSV files</td></tr>
               <tr><td>Parameter Store</td><td>~$0</td><td>Standard parameters are free</td></tr>
               <tr><td>CloudWatch Logs</td><td>~$0.10</td><td>Minimal log volume</td></tr>
-              <tr><td>Bedrock (data collection only)</td><td>N/A</td><td>Not used in this project</td></tr>
-              <tr><td><strong>Total</strong></td><td><strong>&lt;$1/month</strong></td><td>Effectively free</td></tr>
+              <tr><td><strong>Total</strong></td><td><strong>Under $1/month</strong></td><td>AWS charges only</td></tr>
             </tbody>
           </table>
         </div>
         <p>
-          The entire system operates within AWS free tier limits. The only meaningful cost
-          was the Polygon API subscription.
+          AWS charges were under $1/month, with most services inside the free tier. The only
+          meaningful cost was the Polygon API subscription.
         </p>
       </section>
 
@@ -404,29 +408,28 @@ Init Duration: 3354.69 ms   ← cold start</pre>
         <h2>Operational Learnings</h2>
         <ul>
           <li>
-            <strong>Silent failures are worse than loud failures.</strong> A Lambda that
+            <strong>Validate data before reporting success.</strong> A Lambda that
             completes successfully with empty output is harder to detect than one that
-            throws an exception. Data validation is required if I do another similar project.
+            throws an exception. I would include data validation in any similar project.
           </li>
           <li>
-            <strong>S3 versioning requires a lifecycle policy.</strong> Enabling versioning
-            without expiry rules causes exponential storage growth on any bucket with regular
-            overwrites.
+            <strong>Add a lifecycle policy when enabling S3 versioning.</strong> Versioning
+            without expiry rules keeps a full copy of every overwritten object, so storage
+            keeps growing every day on any bucket with regular overwrites.
           </li>
           <li>
-            <strong>Tag everything from day one.</strong> Running multiple projects in one
+            <strong>Tag resources from the start.</strong> Running multiple projects in one
             account without tagging makes cost attribution and resource cleanup significantly
             harder.
           </li>
           <li>
-            <strong>Match the interface to actual behaviour.</strong> The Telegram bot
-            was over-engineered with multiple commands. Real usage collapsed to one.
-            Build for what you actually need, extend when you need more.
+            <strong>Build the commands that are actually used.</strong> I built several
+            Telegram bot commands, but in practice I mainly used one (<code>/daily</code>).
           </li>
           <li>
-            <strong>Right-size the solution.</strong> S3 CSV files over RDS, Lambda over EC2,
-            Parameter Store over Secrets Manager — each decision was made by asking
-            "what does this workload actually need?" not "what is the most sophisticated option?"
+            <strong>Choose services based on workload requirements.</strong> I chose S3 CSV
+            files over RDS, Lambda over EC2, and Parameter Store over Secrets Manager based on
+            what this workload needed.
           </li>
         </ul>
         <div style="padding-bottom: 3rem;"></div>
