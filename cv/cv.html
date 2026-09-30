@@ -178,7 +178,7 @@
       <li>Split the application across two hosts: CloudFront and S3 for the static sign-in site, and ECS Fargate behind an ALB for the authenticated gameplay runtime, all in modular Terraform.</li>
       <li>Kept live game state in Redis, with a background finalisation queue that saves each completed game to DynamoDB in one transactional write regardless of move count.</li>
       <li>Built PR-gated CI (backend, frontend and Terraform checks required on <code>main</code>, no admin bypass) with OIDC-authenticated deploys, plus CloudWatch alarms and eight custom application metrics.</li>
-      <li><strong>Analysed a $212/month AWS bill</strong> and found that VPC interface endpoints bill per Availability Zone, accounting for $89 of it. Documented the fixed and variable costs and shut the environment down on that basis.</li>
+      <li><strong>Analysed a $212/month AWS bill</strong> and found that VPC interface endpoints bill per Availability Zone, accounting for $89 of it. Documented the fixed and variable costs of running it.</li>
     </ul>
   </div>
 
