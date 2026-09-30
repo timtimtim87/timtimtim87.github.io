@@ -78,14 +78,13 @@
 
     <section style="padding-top:2rem;">
       <p>
-        The diagram below shows the logic flow for each area of the application (room creation,
-        the video session, chess gameplay and session teardown) as separate flows rather than
-        one combined graph.
+        The diagram below shows how a session runs, from sign-in and the challenge to the games,
+        a dropped connection, and the room closing.
       </p>
     </section>
 
     <figure style="margin-top:2rem;">
-      <img src="media/chesschat-user-flow-light.png" alt="ChessChat user flow diagram showing room creation, video session, chess gameplay and session teardown" style="width:100%;" />
+      <img src="media/chesschat-session-flow.png" alt="ChessChat session flow from sign-in to room closure, including the reconnect grace period" style="width:100%; max-width:560px; display:block; margin:0 auto;" />
     </figure>
 
     <section style="padding-top:2.5rem;">
@@ -137,7 +136,7 @@ Static landing / auth       Authenticated gameplay runtime
     </section>
 
     <figure style="margin-top:2rem;">
-      <img src="media/chesschat-infra-light.png" alt="ChessChat infrastructure diagram showing three-tier VPC, ECS Fargate, ALB, Redis, DynamoDB, CloudFront and Cognito" style="width:100%;" />
+      <img src="media/chesschat-architecture.png" alt="ChessChat infrastructure diagram showing three-tier VPC, ECS Fargate, ALB, Redis, DynamoDB, CloudFront and Cognito" style="width:100%;" />
     </figure>
 
     <section style="padding-top:2rem;">
